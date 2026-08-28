@@ -22,6 +22,28 @@ const storedPref = (key, allowed, fallback) => {
   return value !== null && allowed.includes(value) ? value : fallback;
 };
 
+/**
+ * Feature switches, Settings tab. Everything defaults to how the app shipped;
+ * RPG and AI modes default off — they add, never take away.
+ */
+const SETTING_DEFS = [
+  { key: 'rail', label: 'Alert rail', note: 'The "Needs attention" strip of rule-driven actions.', on: true },
+  { key: 'actionChips', label: 'Action chips on rosters', note: 'LOAN OUT / SIGN TO SENIOR chips on squad and youth rows.', on: true },
+  { key: 'trendArrows', label: 'Trend arrows', note: 'Season-form arrows next to each rating change: ▲ surge, ↗ rise, — flat, ↘ dip, ▼ fall.', on: true },
+  { key: 'developFocus', label: 'Development focus', note: 'On the player card: the attributes where growth buys the most, from the fit weights and this world\u2019s percentiles. Point the game\u2019s development plans at them.', on: true },
+  { key: 'absurd', label: 'The absurd bit', note: 'The cheeky lines on the Story card.', on: true },
+  { key: 'rpg', label: 'RPG mode', note: 'Career-as-campaign: live challenges computed from your save, with progress. Deterministic — every number is real.', on: false },
+  { key: 'ai', label: 'AI mode', note: 'AI narration and insights on top of the recorded facts. Needs a local model or an API key; until one is configured this shows its setup status.', on: false },
+];
+const settings = (() => {
+  try {
+    return { ...Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d.on])), ...JSON.parse(localStorage.getItem('settings') || '{}') };
+  } catch {
+    return Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d.on]));
+  }
+})();
+const saveSettings = () => localStorage.setItem('settings', JSON.stringify(settings));
+
 const state = {
   doc: null,
   view: 'squad',
@@ -32,6 +54,7 @@ const state = {
   rail: localStorage.getItem('rail') !== 'hidden',
   wageSel: null,
   wageFilter: 'all',
+  oppSel: null,
   open: new Set(),
   attrs: new Set(),
   lastSync: null,
@@ -169,6 +192,29 @@ function rateChip(label, value, ceiling) {
   }
   return chip;
 }
+
+const TREND = {
+  surge: { glyph: '▲', cls: 'tr-surge', word: 'surging' },
+  rise: { glyph: '↗', cls: 'tr-rise', word: 'rising' },
+  flat: { glyph: '—', cls: 'tr-flat', word: 'steady' },
+  dip: { glyph: '↘', cls: 'tr-dip', word: 'dipping' },
+  fall: { glyph: '▼', cls: 'tr-fall', word: 'falling' },
+};
+function trendArrow(p) {
+  if (!settings.trendArrows || !p.trend) return null;
+  const t = TREND[p.trend];
+  const node = el('i', `trend ${t.cls}`, t.glyph);
+  node.dataset.tip = `${t.word} — ${p.overallSeasonDelta > 0 ? '+' : ''}${p.overallSeasonDelta} since July, from this career's own snapshots`;
+  return node;
+}
+
+/** Contract time the way the game says it: 42 months is "3y 6m", not "42mo". */
+const fmtTerm = (m) =>
+  m === null || m === undefined
+    ? '—'
+    : m < 12
+      ? `${m}m`
+      : `${Math.floor(m / 12)}y${m % 12 ? ` ${m % 12}m` : ''}`;
 
 function delta(d) {
   if (d === null || d === undefined) return null;
@@ -339,7 +385,7 @@ const FILTERS = [
   { id: 'special', label: 'Special / Exciting', test: (p) => p.potentialTag === 'Special' || p.potentialTag === 'Exciting' },
   { id: 'u21', label: 'Under 21', test: (p) => p.age !== null && p.age < 21 },
   { id: 'injured', label: 'Injured', test: (p) => p.injured },
-  { id: 'expiring', label: 'Contract < 12mo', test: (p) => p.contractMonths !== null && p.contractMonths <= 12 },
+  { id: 'expiring', label: 'Contract < 1y', test: (p) => p.contractMonths !== null && p.contractMonths <= 12 },
   { id: 'starved', label: 'Barely playing', test: (p) => (p.minutesThisSeason ?? 0) === 0 },
   { id: 'newgen', label: 'Academy product', test: (p) => p.isNewgen },
 ];
@@ -548,6 +594,17 @@ function playerCard(p, onClose) {
   }
   if (flags.childElementCount) card.appendChild(flags);
 
+  if (settings.developFocus && p.developFocus?.length) {
+    const dev = el('div', 'devfocus');
+    dev.appendChild(el('span', 'lbl', 'DEVELOP'));
+    for (const d of p.developFocus) {
+      const chip = el('span', 'chipish', `${prettyAttr(d.attr)} ${d.value}`);
+      chip.dataset.tip = `${d.percentile}th percentile among ${p.positionShort ?? 'position'}s in this world, and heavily weighted in the ${p.positionShort ?? ''} fit model — growth here buys the most. Point an in-game development plan at it.`;
+      dev.appendChild(chip);
+    }
+    card.appendChild(dev);
+  }
+
   // The player's signature: attributes in the top of the position's world
   // population. "78-rated winger" hides that his pace is elite; this does not.
   if (p.standout.length) {
@@ -624,9 +681,9 @@ function playerCard(p, onClose) {
       : `Average match rating ± its spread over ${p.appearances} games — a low spread means they show up every week.`,
   );
   add('Wage', money(p.wage), p.wageNote ?? undefined);
-  add('Deal', p.contractMonths === null ? null : `${p.contractMonths}mo`);
+  add('Deal', p.contractMonths === null ? null : fmtTerm(p.contractMonths));
   add('Role', p.squadRole === 'None' ? null : p.squadRole);
-  if (p.youth) add('In academy', p.youth.monthsInSquad === null ? null : `${p.youth.monthsInSquad}mo`);
+  if (p.youth) add('In academy', p.youth.monthsInSquad === null ? null : fmtTerm(p.youth.monthsInSquad));
   if (p.synergy.length) {
     add('Links', p.synergy.length, p.synergy.slice(0, 5).map((l) => l.evidence).join('\n'));
   }
@@ -832,7 +889,11 @@ function renderPlayers(list) {
     row.appendChild(el('span', 'rage', p.age !== null ? `${p.age}y` : ''));
 
     const g = delta(p.overallSeasonDelta);
-    row.appendChild(el('span', `rdelta ${g && g.text !== '0' ? g.cls : 'flat'}`, g && g.text !== '0' ? g.text : ''));
+    const dcell = el('span', `rdelta ${g && g.text !== '0' ? g.cls : 'flat'}`);
+    const arrow = trendArrow(p);
+    if (arrow) dcell.appendChild(arrow);
+    if (g && g.text !== '0') dcell.append(g.text);
+    row.appendChild(dcell);
 
     const marks = el('span', 'rmarks');
     if (p.injured) marks.appendChild(el('i', 'mk down', '✚'));
@@ -840,7 +901,7 @@ function renderPlayers(list) {
     if (p.potentialTag === 'Special' || p.potentialTag === 'Exciting') marks.appendChild(el('i', 'mk gold', '◆'));
     row.appendChild(marks);
 
-    const act = [p.advice, ...p.otherAdvice].find((a) => a.severity !== 'steady');
+    const act = settings.actionChips ? [p.advice, ...p.otherAdvice].find((a) => a.severity !== 'steady') : null;
     row.appendChild(act ? el('span', `act ${act.severity}`, act.tag) : el('span', 'rquiet', ''));
 
     row.appendChild(el('span', 'rmins', p.minutesThisSeason !== null ? `${p.minutesThisSeason}'` : ''));
@@ -848,7 +909,7 @@ function renderPlayers(list) {
     row.title = [
       p.form ? `Form ${p.form}` : null,
       p.morale,
-      p.contractMonths !== null ? `${p.contractMonths}mo left on the deal` : null,
+      p.contractMonths !== null ? `${fmtTerm(p.contractMonths)} left on the deal` : null,
       act ? act.line : null,
     ]
       .filter(Boolean)
@@ -1065,6 +1126,8 @@ function renderMatchday(doc) {
         chip.classList.add('swap');
       } else if (best) {
         chip.appendChild(el('span', null, `${nameOf(best.playerId)} ${best.score}`));
+        // No taker assigned in game: dashed border instead of the missing one.
+        chip.classList.add('unset');
       }
       chip.dataset.tip =
         `${r.role} — ${r.formula}`+ '\n' +
@@ -1074,6 +1137,56 @@ function renderMatchday(doc) {
     }
     top.appendChild(roles);
   }
+  // Opponent scout: the save holds no fixture list, but it holds every
+  // opponent's squad — pick who you play next and read the lines.
+  if (doc.opponents?.length > 1) {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, '🔎 Opponent scout'));
+    panel.appendChild(
+      el('p', 'muted tiny', 'The save has no fixture list, so pick the club you play next. Lines are the mean rating of their best XI: keeper, back four, middle four, front three.'),
+    );
+    const mine = doc.opponents.find((o) => o.teamId === doc.club?.id);
+    const chips = el('div', 'chiprow');
+    for (const o of doc.opponents) {
+      if (o.teamId === doc.club?.id) continue;
+      const chip = el('button', `chip${state.oppSel === o.teamId ? ' on' : ''}`, o.name);
+      activatable(chip, () => { state.oppSel = o.teamId; render(); }, { skipWhen: () => state.oppSel === o.teamId });
+      chips.appendChild(chip);
+    }
+    panel.appendChild(chips);
+    const opp = doc.opponents.find((o) => o.teamId === state.oppSel);
+    if (opp && mine) {
+      const line = (label, ours, theirs) => {
+        const d = ours !== null && theirs !== null ? Math.round((ours - theirs) * 10) / 10 : null;
+        return [label, { text: ours ?? '—', num: true, tier: ours }, { text: theirs ?? '—', num: true, tier: theirs },
+          { text: d === null ? '—' : `${d > 0 ? '+' : ''}${d}`, num: true }];
+      };
+      panel.appendChild(
+        table(
+          ['Line', { label: 'You', num: true }, { label: opp.name, num: true }, { label: 'Edge', num: true }],
+          [line('Best XI', mine.overall, opp.overall), line('Goalkeeper', mine.gk, opp.gk),
+           line('Defence', mine.def, opp.def), line('Midfield', mine.mid, opp.mid), line('Attack', mine.att, opp.att)],
+        ),
+      );
+      const bits = [];
+      if (opp.threats.length) bits.push(`Threats: ${opp.threats.map((t2) => `${t2.name} (${t2.pos ?? '?'} ${t2.overall})`).join(' · ')}.`);
+      if (opp.pace) bits.push(`Fastest: ${opp.pace.name}, ${opp.pace.sprint} sprint speed — mind the ball over the top.`);
+      const lines2 = [];
+      const edges = [['goalkeeper', mine.gk, opp.gk], ['defence', mine.def, opp.def], ['midfield', mine.mid, opp.mid], ['attack', mine.att, opp.att]]
+        .filter(([, a, b]) => a !== null && b !== null)
+        .map(([n2, a, b]) => [n2, Math.round((a - b) * 10) / 10]);
+      const best = [...edges].sort((a, b) => b[1] - a[1])[0];
+      const worst = [...edges].sort((a, b) => a[1] - b[1])[0];
+      if (best && best[1] > 0) lines2.push(`Your biggest edge is ${best[0]} (+${best[1]}) — play through it.`);
+      if (worst && worst[1] < 0) lines2.push(`They outrate your ${worst[0]} by ${Math.abs(worst[1])} — that is where the game can be lost.`);
+      for (const b of bits) panel.appendChild(el('p', 'tipline', b));
+      for (const l2 of lines2) panel.appendChild(el('p', 'tipline', l2));
+    } else {
+      panel.appendChild(el('p', 'muted tiny', 'Rest on a club to compare.'));
+    }
+    frag.appendChild(panel);
+  }
+
   // Every saved team sheet, scored the same way: the game lets a manager keep
   // several, and reading only the first silently ignored the rest.
   if (m.sheets?.length > 1) {
@@ -1561,7 +1674,7 @@ function renderWages(doc) {
       row.appendChild(el('span', 'rpos', p.positionShort ?? '—'));
       row.appendChild(el('span', 'sname', p.name));
       row.appendChild(r ? el('span', `act ${urgencyCls[r.urgency]}`, urgencyLabel[r.urgency]) : el('span', 'act none', ''));
-      row.appendChild(el('span', 'smeta', p.contractMonths === null ? '' : `${p.contractMonths}mo`));
+      row.appendChild(el('span', 'smeta', p.contractMonths === null ? '' : fmtTerm(p.contractMonths)));
       row.appendChild(el('span', 'swage', money(p.wage)));
       activatable(
         row,
@@ -1585,7 +1698,7 @@ function renderWages(doc) {
       if (p.positionShort) head.appendChild(el('span', 'badge-pos', p.positionShort));
       right.appendChild(head);
       right.appendChild(
-        el('p', 'muted', `On ${money(p.wage)} a week${p.contractMonths === null ? '' : `, ${p.contractMonths} months left`}${p.squadRole ? ` · ${p.squadRole}` : ''}.`),
+        el('p', 'muted', `On ${money(p.wage)} a week${p.contractMonths === null ? '' : `, ${fmtTerm(p.contractMonths)} left`}${p.squadRole ? ` · ${p.squadRole}` : ''}.`),
       );
       const assess = w.assessmentList.find((a) => a.playerId === p.playerId);
       if (assess?.note) right.appendChild(el('p', 'tipline', assess.note));
@@ -1604,7 +1717,7 @@ function renderWages(doc) {
       if (p.positionShort) head.appendChild(el('span', 'badge-pos', p.positionShort));
       right.appendChild(head);
       right.appendChild(
-        el('p', 'muted', `On ${money(sel.currentWage)} a week${sel.monthsLeft === null ? '' : `, ${sel.monthsLeft} months left`}.`),
+        el('p', 'muted', `On ${money(sel.currentWage)} a week${sel.monthsLeft === null ? '' : `, ${fmtTerm(sel.monthsLeft)} left`}.`),
       );
 
       for (const o of sel.options) {
@@ -2271,7 +2384,7 @@ function storySvg(doc) {
   y += 12;
 
   // Absurdities
-  if (f.absurd.length) {
+  if (f.absurd.length && settings.absurd) {
     t(64, y, 'THE ABSURD BIT', 22, DIM, 700, 'start', '0.15em');
     y += 42;
     for (const line of f.absurd.slice(0, 3)) {
@@ -2302,6 +2415,41 @@ function storyCaption(doc) {
   if (f.absurd.length) out.push(f.absurd[0]);
   out.push('#FC26 #CareerMode');
   return out.join(String.fromCharCode(10));
+}
+
+/**
+ * RPG mode: the career as a campaign. Every challenge is computed live from
+ * the document — real numbers, deterministic thresholds, no dice behind the
+ * curtain. Completion is "the condition holds right now"; history lands when
+ * the story ledger ships (docs/ai-features.md phase A).
+ */
+function rpgChallenges(doc) {
+  const cur = doc.seasons[doc.seasons.length - 1];
+  const xi = doc.matchday?.recommended?.assignments ?? [];
+  const byId = new Map([...doc.senior, ...doc.academy].map((p) => [p.playerId, p]));
+  const xiPlayers = xi.map((a) => byId.get(a.playerId)).filter(Boolean);
+  const out = [];
+  const add = (name, line, value, target, higherIsBetter = true) => {
+    if (value === null || value === undefined) return;
+    const pct = higherIsBetter ? Math.min(100, Math.round((value / target) * 100)) : Math.min(100, Math.round((target / Math.max(value, 0.01)) * 100));
+    out.push({ name, line, value, target, pct, done: higherIsBetter ? value >= target : value <= target });
+  };
+  if (cur && cur.played > 0) {
+    add('Century', `Score 100 league goals in a season — ${cur.goalsFor} so far.`, cur.goalsFor, 100);
+    add('The Wall', `Concede 0.8 a game or less — at ${(cur.goalsAgainst / cur.played).toFixed(2)}.`, cur.goalsAgainst / cur.played, 0.8, false);
+    add('Invincible run', `Go the season unbeaten — ${cur.losses} ${cur.losses === 1 ? 'loss' : 'losses'} so far.`, cur.losses, 0, false);
+  }
+  if (xiPlayers.length >= 11) {
+    const ages = xiPlayers.map((p) => p.age).filter((a) => a !== null);
+    const meanAge = ages.length ? ages.reduce((a, b) => a + b, 0) / ages.length : null;
+    if (meanAge !== null) add('Youth revolution', `Field an XI averaging under 24 — currently ${meanAge.toFixed(1)}.`, meanAge, 24, false);
+    const grads = xiPlayers.filter((p) => p.isNewgen).length;
+    add('Academy XI', `Three academy products in the best XI — ${grads} there now.`, grads, 3);
+  }
+  const sales = doc.seasons.reduce((a, x) => a + (x.bigSell?.amount ?? 0), 0);
+  const buys = doc.seasons.reduce((a, x) => a + (x.bigBuy?.amount ?? 0), 0);
+  if (sales || buys) add('Moneyball', `Record sales outweigh record buys — ${moneyShort(sales)} out vs ${moneyShort(buys)} in.`, sales, Math.max(buys, 1));
+  return out;
 }
 
 function renderStory(doc) {
@@ -2384,9 +2532,64 @@ function renderStory(doc) {
   cap.appendChild(el('p', 'muted tiny', 'What “Copy caption” puts on your clipboard — paste it next to the image.'));
   side.appendChild(cap);
 
+  if (settings.rpg) {
+    const rpg = el('div', 'panel');
+    rpg.appendChild(el('h2', null, '🎲 Campaign challenges'));
+    for (const c of rpgChallenges(doc)) {
+      const row = el('div', 'quest');
+      const head2 = el('div', 'qhead');
+      head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
+      head2.appendChild(el('span', 'muted tiny', c.line));
+      row.appendChild(head2);
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill${c.done ? ' done' : ''}`);
+      fill.style.width = `${c.pct}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      rpg.appendChild(row);
+    }
+    rpg.appendChild(el('p', 'muted tiny', 'Live conditions computed from this save — a challenge reads done while the condition holds. Persistent completion history arrives with the story ledger.'));
+    side.appendChild(rpg);
+  }
+
+  if (settings.ai) {
+    const ai = el('div', 'panel');
+    ai.appendChild(el('h2', null, '✨ AI mode'));
+    ai.appendChild(
+      el('p', 'muted', 'Switched on, not yet wired: AI narration needs a language-model provider — a local one (Ollama / LM Studio) or an API key. Nothing here fakes it in the meantime; the deterministic app is complete without it.'),
+    );
+    ai.appendChild(el('p', 'muted tiny', 'The implementation plan lives in docs/ai-features.md — grounding contract, provider setup, and what the narration will and will not be allowed to do.'));
+    side.appendChild(ai);
+  }
+
   cols.appendChild(side);
   frag.appendChild(cols);
 
+  return frag;
+}
+
+function renderSettings() {
+  const frag = document.createDocumentFragment();
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, '⚙ Settings'));
+  panel.appendChild(el('p', 'muted', 'Switches persist in this browser. Nothing here touches the save or the store.'));
+  for (const def of SETTING_DEFS) {
+    const row = el('div', 'setrow');
+    const sw = el('button', `switch${settings[def.key] ? ' on' : ''}`);
+    sw.appendChild(el('i', 'knob'));
+    activatable(sw, () => {
+      settings[def.key] = !settings[def.key];
+      saveSettings();
+      render();
+    });
+    row.appendChild(sw);
+    const txt = el('div', 'settext');
+    txt.appendChild(el('b', null, def.label));
+    txt.appendChild(el('span', 'muted tiny', def.note));
+    row.appendChild(txt);
+    panel.appendChild(row);
+  }
+  frag.appendChild(panel);
   return frag;
 }
 
@@ -2400,6 +2603,7 @@ const VIEWS = {
   loans: { label: 'Loans', render: renderLoans, count: (d) => d.loans.out.length + d.loans.candidates.length },
   stats: { label: 'Stats', render: renderStats, count: () => null },
   story: { label: 'Story', render: renderStory, count: () => null },
+  settings: { label: '⚙', render: renderSettings, count: () => null },
 };
 
 /* ---------------- shell ---------------- */
@@ -2470,7 +2674,8 @@ function renderShell(doc) {
 
   const rail = $('#rail');
   rail.textContent = '';
-  const alerts = doc.alerts.slice(0, 40);
+  rail.style.display = settings.rail ? '' : 'none';
+  const alerts = settings.rail ? doc.alerts.slice(0, 40) : [];
 
   // The rail announces itself once and can be put away entirely — it is the
   // loudest thing on the page, so it has to be dismissible.

@@ -101,6 +101,14 @@ export interface RuleInput {
 
 const pct = (v: number | null): string => (v === null ? 'unknown' : `${Math.round(v)}%`);
 
+/** Contract time the way the game says it: "3y 6m", "2y", "8m". */
+export const term = (months: number | null): string =>
+  months === null
+    ? 'unknown'
+    : months < 12
+      ? `${months}m`
+      : `${Math.floor(months / 12)}y${months % 12 ? ` ${months % 12}m` : ''}`;
+
 type Rule = (i: RuleInput) => Advice | null;
 
 const RULES: Rule[] = [
@@ -199,8 +207,8 @@ const RULES: Rule[] = [
           priority: 70,
           severity: 'watch',
           tag: 'Release',
-          line: `Contract ends in ${i.contractMonths} months at ${i.age} with no growth left. Let it run out.`,
-          evidence: `${i.contractMonths} months left, growth left ${i.headroom}, age ${i.age}`,
+          line: `Contract ends in ${term(i.contractMonths)} at ${i.age} with no growth left. Let it run out.`,
+          evidence: `${term(i.contractMonths)} left, growth left ${i.headroom}, age ${i.age}`,
         }
       : null,
 
@@ -281,10 +289,10 @@ const RULES: Rule[] = [
           severity: i.contractMonths <= THRESHOLDS.youthContractUrgent ? 'urgent' : 'action',
           tag: 'Sign to senior',
           line:
-            `Academy deal has ${i.contractMonths} months left on a ${i.potential} ceiling. ` +
+            `Academy deal has ${term(i.contractMonths)} left on a ${i.potential} ceiling. ` +
             'Offer a contract in game while you still have room to.',
           evidence:
-            `${i.contractMonths} months left, potential ${i.potential}, age ${i.age ?? 'unknown'}. ` +
+            `${term(i.contractMonths)} left, potential ${i.potential}, age ${i.age ?? 'unknown'}. ` +
             'Counted from the contract in the save. The game’s own "wants to terminate" ' +
             'message is not stored, so this fires earlier than that warning, not from it.',
         }
@@ -331,8 +339,8 @@ const RULES: Rule[] = [
           priority: 35,
           severity: 'urgent',
           tag: 'Renew',
-          line: `${i.contractMonths} months left with ${i.headroom} still to grow. Renew or lose a free transfer.`,
-          evidence: `${i.contractMonths} months left, growth left ${i.headroom}`,
+          line: `${term(i.contractMonths)} left with ${i.headroom} still to grow. Renew or lose a free transfer.`,
+          evidence: `${term(i.contractMonths)} left, growth left ${i.headroom}`,
         }
       : null,
 

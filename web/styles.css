@@ -821,8 +821,12 @@ th.sortable, .rhead span { white-space: nowrap; }
   padding: 1px 0; border: 1px solid var(--line-soft); border-radius: 999px;
   background: var(--panel-2); text-align: center;
 }
-.rrow { grid-template-columns: 18px 3.4em 28px minmax(130px, 1.2fr) auto 3em 2.8em 3.4em minmax(90px, auto) 3.4em; }
-.rhead { grid-template-columns: 18px 3.4em 28px minmax(130px, 1.2fr) auto 3em 2.8em 3.4em minmax(90px, auto) 3.4em; }
+/* Fixed tracks, identical for header and every row. The old `auto` tracks
+ * sized independently per row, so each row drew its own private columns and
+ * the whole roster shredded out of alignment. */
+.rrow { grid-template-columns: 18px 3.4em 28px minmax(130px, 1fr) 9.5em 3em 3.6em 3.4em 10em 3.4em; }
+.rhead { grid-template-columns: 18px 3.4em 28px minmax(130px, 1fr) 9.5em 3em 3.6em 3.4em 10em 3.4em; }
+.roster { max-width: 1500px; }
 .roster .rkey { margin: 6px 2px 0; }
 
 /* Scout stars in the same metals as skill moves. */
@@ -1005,3 +1009,43 @@ th.sortable { padding-right: 20px; }
 th.sortable.on::after, th.sortable.on.asc::after {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
 }
+
+/* ============================================================ wave: trend, focus, settings, rpg */
+
+.trend { font-style: normal; font-size: 11px; margin-right: 3px; }
+.tr-surge { color: var(--up); }
+.tr-rise { color: var(--up); opacity: 0.8; }
+.tr-flat { color: var(--ink-faint); }
+.tr-dip { color: var(--act); }
+.tr-fall { color: var(--urgent); }
+
+.devfocus { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 6px 0 2px; }
+.devfocus .lbl { font-size: 10px; letter-spacing: 0.08em; color: var(--ink-faint); font-weight: 700; }
+.devfocus .chipish {
+  font-size: 12px; padding: 2px 9px; border-radius: 999px;
+  border: 1px dashed var(--brand-line); color: var(--brand);
+}
+
+.rolechip.unset { border: 1px dashed var(--line); }
+
+.setrow { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+.setrow:last-of-type { border-bottom: none; }
+.settext { display: flex; flex-direction: column; gap: 2px; max-width: 46em; }
+.switch {
+  position: relative; overflow: visible; flex: none; cursor: pointer;
+  width: 40px; height: 22px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel-2);
+  margin-top: 2px;
+}
+.switch .knob {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--ink-faint); transition: left 0.15s, background 0.15s;
+}
+.switch.on { background: var(--brand-bg); border-color: var(--brand-line); }
+.switch.on .knob { left: 20px; background: var(--brand); }
+
+.quest { margin: 8px 0; }
+.qhead { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 3px; }
+.quest .btrack { height: 8px; }
+.quest .bfill { background: var(--watch); }
+.quest .bfill.done { background: var(--brand); }

@@ -30,7 +30,7 @@ export const SLOTS: readonly Slot[] = ['GK', 'CB', 'FB', 'WB', 'CDM', 'CM', 'CAM
  * position fit now simply *is* his overall. It is an answer to the question the
  * game will not answer: what would he rate as, played somewhere else.
  */
-const MODEL: Record<Slot, { intercept: number; weights: Record<string, number> }> = {
+export const MODEL: Record<Slot, { intercept: number; weights: Record<string, number> }> = {
   GK: {
     intercept: 0.86,
     weights: {

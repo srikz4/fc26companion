@@ -30,7 +30,7 @@ import {
   SQUAD_ROLE_LABELS,
 } from '../domain/attributes.ts';
 import { YOUTH_TEAM_ID } from '../core/saveLocation.ts';
-import { allFits, bestFit, calibrationReport, fitFor, slotOf, type Slot } from './fit.ts';
+import { MODEL, allFits, bestFit, calibrationReport, fitFor, slotOf, type Slot } from './fit.ts';
 import {
   buildSynergy,
   profileOf as synergyProfile,
@@ -45,6 +45,7 @@ import {
   buildWorldStats,
   standoutAttributes,
   type WorldStats,
+  attributePercentile,
 } from './percentiles.ts';
 import { alertRail, availabilityAlerts, evaluate, type AlertLine, type Advice, type RuleInput } from './rules.ts';
 import { buildWageReport, contractMonths, type WageReport } from './wages.ts';
@@ -122,6 +123,8 @@ export interface PlayerView {
   potentialTag: string | null;
 
   overallSeasonDelta: number | null;
+  /** surge / rise / flat / dip / fall — season delta plus the last month's slope. */
+  trend: 'surge' | 'rise' | 'flat' | 'dip' | 'fall' | null;
   /** Ceiling change since July 1, from this career's own snapshots. */
   potentialSeasonDelta: number | null;
   overallSeries: SeriesPoint[];
@@ -163,6 +166,8 @@ export interface PlayerView {
   synergy: ChannelLink[];
   /** Attributes in the top of the position's world population. */
   standout: { attr: string; value: number; percentile: number }[];
+  /** Where growth buys the most fit: heavy-weighted attributes below the position's 55th percentile. */
+  developFocus: { attr: string; value: number; percentile: number }[];
   /** Where he stands against everyone his age in this world. */
   generation: { overall: number; potential: number | null; peers: number } | null;
   /** Spread of his match ratings — low means he shows up every week. */
@@ -222,6 +227,24 @@ export interface ViewDocument {
     bigLoss: { userScore: number; oppScore: number; opponent: string; date: number } | null;
   };
   deals: { observed: DealsModel['deals']; sample: number; modelled: boolean };
+  /**
+   * Every club in your own league, measured line by line. The save has no
+   * fixture list (verified — §1.7), so it cannot say who is next; it does
+   * hold every opponent's squad, so pick the club you are about to play and
+   * read how the lines compare.
+   */
+  opponents: {
+    teamId: number;
+    name: string;
+    /** Mean overall of the best plausible XI (best GK + top ten outfield). */
+    overall: number | null;
+    gk: number | null;
+    def: number | null;
+    mid: number | null;
+    att: number | null;
+    threats: { name: string; pos: string | null; overall: number }[];
+    pace: { name: string; sprint: number } | null;
+  }[];
   seasons: SeasonRecord[];
   regens: RegenReport;
   wages: WageReport & { assessmentList: { playerId: number; verdict: string; note: string; wage: number | null; peerMedian: number | null }[] };
@@ -236,6 +259,8 @@ export interface MatchdayView {
   shapes: ShapeComparison[];
   /** Every saved team sheet, scored: mean anchored fit of its XI in its own positions. */
   sheets: { name: string; shapeName: string | null; players: number; today: number | null }[];
+  /** Packed role codes (roleId*64+focus) per saved-XI player; names unmapped (R-1). */
+  sheetRoles: { playerId: number; code: number | null; roleId: number | null; focus: number | null }[];
   unavailable: { playerId: number; name: string; reason: string }[];
   /** Calibration of our fit numbers against the game's ratings. */
   calibration: ReturnType<typeof calibrationReport>;
@@ -559,14 +584,41 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     // season-start potential, so the base is our earliest snapshot since
     // July 1 — which also means a drift of null reads "no snapshots yet",
     // never "no change".
-    const potentialPoints =
+    const seasonSeries = (field: string) =>
       input.store && input.careerId !== undefined
         ? input.store
-            .series(input.careerId, id, 'potential')
-            .filter((p2) => p2.gameDate !== null && p2.gameDate >= seasonStartYmd && p2.value !== null)
+            .series(input.careerId!, id, field)
+            .filter((p2) => p2.gameDate !== null && p2.value !== null && p2.gameDate >= seasonStartYmd)
         : [];
+    const potentialPoints = seasonSeries('potential');
     const ceilingDrift =
       potential !== null && potentialPoints.length > 0 ? potential - potentialPoints[0]!.value! : null;
+
+    // Season growth, from the same anchor. The save's own growth-baseline
+    // table MOVES mid-season (observed: a player at 77 -> 81 showed +3, then
+    // at 82 showed +2 — the baseline had rolled from 78 to 80), so it cannot
+    // mean "since the season began". Our earliest snapshot since July 1 can.
+    const overallPoints = seasonSeries('overallrating');
+    const snapshotSeasonDelta =
+      overall !== null && overallPoints.length > 0 ? overall - overallPoints[0]!.value! : null;
+    // Recent slope: the last month of snapshots, for the trend arrow.
+    const recentPoints = overallPoints.slice(-6);
+    const recentDelta =
+      recentPoints.length >= 2 ? recentPoints[recentPoints.length - 1]!.value! - recentPoints[0]!.value! : null;
+    const seasonDelta = snapshotSeasonDelta ?? (overall !== null && baseOverall !== null ? overall - baseOverall : null);
+    /** Five states for the trend arrow: strong rise, rise, flat, dip, fall. */
+    const trend =
+      seasonDelta === null
+        ? null
+        : seasonDelta >= 3 || (recentDelta ?? 0) >= 2
+          ? 'surge'
+          : seasonDelta >= 1
+            ? 'rise'
+            : seasonDelta <= -3 || (recentDelta ?? 0) <= -2
+              ? 'fall'
+              : seasonDelta <= -1
+                ? 'dip'
+                : 'flat';
 
     const groups = groupsFor(player).map((group) => {
       const attributes: AttributeValue[] = group.members.map((key) => {
@@ -636,7 +688,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       potential,
       headroom,
       minutesPct: squad === 'senior' && history.length ? (minutes / maxMinutes) * 100 : squad === 'senior' ? 0 : null,
-      overallSeasonDelta: overall !== null && baseOverall !== null ? overall - baseOverall : null,
+      overallSeasonDelta: seasonDelta,
       ceilingDriftSeason: ceilingDrift,
       contractMonths: months,
       squad,
@@ -689,7 +741,8 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       headroom: overall !== null && potential !== null ? potential - overall : null,
       potentialTag: potentialTag(potential),
 
-      overallSeasonDelta: overall !== null && baseOverall !== null ? overall - baseOverall : null,
+      overallSeasonDelta: seasonDelta,
+      trend,
       potentialSeasonDelta: ceilingDrift,
       overallSeries: series('overallrating'),
       potentialSeries: series('potential'),
@@ -730,6 +783,21 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       bestSlot: best?.slot ?? null,
       synergy: synergyReport.byPlayer.get(id) ?? [],
       standout: standoutAttributes(worldStats, slotOf(num(player, 'preferredposition1')), player),
+      developFocus: (() => {
+        const slot = slotOf(num(player, 'preferredposition1'));
+        if (!slot || (potential ?? 0) - (overall ?? 99) < 2) return [];
+        return Object.entries(MODEL[slot].weights)
+          .map(([attr, weight]) => {
+            const value = num(player, attr);
+            const pct = attributePercentile(worldStats, slot, attr, value);
+            if (value === null || pct === null || weight < 0.05 || pct >= 55) return null;
+            return { attr, value, percentile: pct, score: weight * (55 - pct) };
+          })
+          .filter((x): x is NonNullable<typeof x> => x !== null)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 3)
+          .map(({ attr, value, percentile }) => ({ attr, value, percentile }));
+      })(),
       generation: agePercentile(worldStats, age, overall, potential),
       ratingSpread:
         history.length >= 5
@@ -807,6 +875,15 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     recommended: recommendedXI,
     diff: selectionDiff,
     shapes: shapeTable,
+    // Sheet role codes are packed roleId*64+focus (derived from the save:
+    // every observed code has a remainder under 64). Names are unmapped (R-1);
+    // the pairs are shown so the map can be built by reading the game screen.
+    sheetRoles: (savedXI?.players ?? []).map((pl) => ({
+      playerId: pl.playerId,
+      code: pl.roleCode,
+      roleId: pl.roleCode !== null ? Math.floor(pl.roleCode / 64) : null,
+      focus: pl.roleCode !== null ? pl.roleCode % 64 : null,
+    })),
     sheets: allSheets.map((sheet) => {
       const fits = sheet.players
         .map((pl) => {
@@ -1083,6 +1160,68 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     }))
     .sort((a, b) => a.season - b.season);
 
+  // Opponent scout: line-by-line squad measures for every club in the league.
+  const userLeagueId = (() => {
+    for (const l of rowsOf(tables, 'leagueteamlinks')) {
+      if (num(l, 'teamid') === clubId) return num(l, 'leagueid');
+    }
+    return null;
+  })();
+  const leagueClubIds = new Set<number>();
+  for (const l of rowsOf(tables, 'leagueteamlinks')) {
+    if (num(l, 'leagueid') === userLeagueId) {
+      const t = num(l, 'teamid');
+      if (t !== null) leagueClubIds.add(t);
+    }
+  }
+  const playersByClub = new Map<number, Row[]>();
+  for (const [pid, teamId] of clubOf) {
+    if (!leagueClubIds.has(teamId)) continue;
+    const row = players.get(pid);
+    if (!row) continue;
+    const list = playersByClub.get(teamId) ?? [];
+    list.push(row);
+    playersByClub.set(teamId, list);
+  }
+  const groupOf = (code: number | null): 'gk' | 'def' | 'mid' | 'att' | null =>
+    code === null ? null : code === 0 ? 'gk' : code <= 8 ? 'def' : code <= 19 ? 'mid' : 'att';
+  const meanOf = (xs: (number | null)[]): number | null => {
+    const ok = xs.filter((x): x is number => x !== null);
+    return ok.length ? Math.round((ok.reduce((a, b) => a + b, 0) / ok.length) * 10) / 10 : null;
+  };
+  const opponents = [...playersByClub.entries()]
+    .map(([teamId, roster]) => {
+      const rated = roster
+        .map((r) => ({
+          r,
+          overall: num(r, 'overallrating') ?? 0,
+          group: groupOf(num(r, 'preferredposition1')),
+        }))
+        .sort((a, b) => b.overall - a.overall);
+      const top = (g: string, n: number) => rated.filter((x) => x.group === g).slice(0, n);
+      const gk = top('gk', 1);
+      const xi = [...gk, ...rated.filter((x) => x.group !== 'gk').slice(0, 10)];
+      const fastest = roster
+        .map((r) => ({ r, sprint: num(r, 'sprintspeed') ?? 0 }))
+        .sort((a, b) => b.sprint - a.sprint)[0];
+      return {
+        teamId,
+        name: teamNames.get(teamId) ?? `team ${teamId}`,
+        overall: meanOf(xi.map((x) => x.overall)),
+        gk: meanOf(gk.map((x) => x.overall)),
+        def: meanOf(top('def', 4).map((x) => x.overall)),
+        mid: meanOf(top('mid', 4).map((x) => x.overall)),
+        att: meanOf(top('att', 3).map((x) => x.overall)),
+        threats: rated.slice(0, 3).map((x) => ({
+          name: nameOf(num(x.r, 'playerid') ?? -1),
+          pos: positionShort(num(x.r, 'preferredposition1')),
+          overall: x.overall,
+        })),
+        pace: fastest && fastest.sprint > 0 ? { name: nameOf(num(fastest.r, 'playerid') ?? -1), sprint: fastest.sprint } : null,
+      };
+    })
+    .sort((a, b) => (b.overall ?? 0) - (a.overall ?? 0));
+
   const mi = rowsOf(tables, 'career_managerinfo')[0];
   // The manager's own record books: biggest win and loss, with dates and the
   // opponent — 13-0 belongs on a brag card, not in a hex dump.
@@ -1237,6 +1376,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     deals: { observed: dealsModel.deals, sample: dealsModel.sample, modelled: dealsModel.estimate !== null },
     seasons,
     regens,
+    opponents,
     wages: {
       ...wages,
       assessmentList: [...wages.assessments.values()].map((a) => ({
