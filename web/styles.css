@@ -1108,3 +1108,39 @@ th.sortable.on::after, th.sortable.on.asc::after {
 .mile.done .mk2 { color: var(--brand); }
 .mile.next b { color: var(--brand); }
 .mile.next .mk2 { color: var(--brand); }
+
+/* ============================================================ design pass: cards with presence */
+
+.panel {
+  background: linear-gradient(175deg, var(--panel) 0%, var(--bg) 140%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 24px rgba(0, 0, 0, 0.22);
+  transition: border-color 0.15s;
+}
+.panel:hover { border-color: var(--line); }
+.panel h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.panel h2::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, var(--line-soft), transparent); }
+
+.hero-line .stat {
+  padding: 8px 14px; border-radius: var(--r-sm);
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+}
+.hero-line .stat.h-up b { color: var(--up); }
+.hero-line .stat.h-mid b { color: var(--ink-dim); }
+.hero-line .stat.h-down b { color: var(--down); }
+
+.phasebanner {
+  margin: 4px 0 10px; padding: 6px 12px;
+  border-left: 3px solid var(--brand); border-radius: var(--r-sm);
+  background: var(--brand-bg); color: var(--brand);
+  font-size: 13px; font-weight: 650;
+}
+
+.chip.teamchip { display: inline-flex; gap: 7px; align-items: baseline; }
+.teamchip .stars5 { font-style: normal; font-size: 10px; color: var(--m5); letter-spacing: 1px; }
+.chip.teamchip.on .stars5 { color: inherit; }
+
+.rrow, .srow { transition: border-color 0.12s, background 0.12s; }
+.tab { transition: background 0.12s, color 0.12s; }
+main > * { animation: rise 0.18s ease-out; }
+@keyframes rise { from { opacity: 0.4; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { main > * { animation: none; } }

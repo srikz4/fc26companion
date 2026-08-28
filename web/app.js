@@ -90,6 +90,8 @@ const state = {
   wageFilter: 'all',
   oppSel: null,
   oppLeague: null,
+  oppNation: null,
+  devFilter: 'grow',
   open: new Set(),
   attrs: new Set(),
   lastSync: null,
@@ -1222,21 +1224,39 @@ function renderMatchday(doc) {
       el('p', 'muted tiny', 'The save has no fixture list, so pick the club you play next. Lines are the mean rating of their best XI: keeper, back four, middle four, front three.'),
     );
     const mine = doc.opponents.find((o) => o.teamId === doc.club?.id);
-    // League first, then club — you might face anyone in Europe.
-    const leagues = [...new Set(doc.opponents.map((o) => o.league))];
-    leagues.sort((a, b) => (a === mine?.league ? -1 : b === mine?.league ? 1 : a.localeCompare(b)));
-    if (!state.oppLeague || !leagues.includes(state.oppLeague)) state.oppLeague = mine?.league ?? leagues[0];
-    const lchips = el('div', 'chiprow');
-    for (const lg of leagues) {
-      const chip = el('button', `chip${state.oppLeague === lg ? ' on' : ''}`, lg);
-      activatable(chip, () => { state.oppLeague = lg; render(); }, { skipWhen: () => state.oppLeague === lg });
-      lchips.appendChild(chip);
+    // Nation (flags) -> league -> team, the way you would actually look one up.
+    const teamStars = (o) => (o.overall === null ? '' : o.overall >= 83 ? '★★★★★' : o.overall >= 80 ? '★★★★' : o.overall >= 76 ? '★★★' : o.overall >= 72 ? '★★' : '★');
+    const nations = [...new Set(doc.opponents.map((o) => o.nation))];
+    nations.sort((a, b) => (a === mine?.nation ? -1 : b === mine?.nation ? 1 : a.localeCompare(b)));
+    if (!state.oppNation || !nations.includes(state.oppNation)) state.oppNation = mine?.nation ?? nations[0];
+    const nchips = el('div', 'chiprow');
+    for (const n2 of nations) {
+      const chip = el('button', `chip${state.oppNation === n2 ? ' on' : ''}`, `${flagFor(n2)}${n2}`);
+      activatable(chip, () => { state.oppNation = n2; state.oppLeague = null; render(); }, { skipWhen: () => state.oppNation === n2 });
+      nchips.appendChild(chip);
     }
-    panel.appendChild(lchips);
+    panel.appendChild(nchips);
+
+    const leagues = [...new Set(doc.opponents.filter((o) => o.nation === state.oppNation).map((o) => o.league))];
+    leagues.sort((a, b) => (a === mine?.league ? -1 : b === mine?.league ? 1 : a.localeCompare(b)));
+    if (!state.oppLeague || !leagues.includes(state.oppLeague)) state.oppLeague = leagues[0];
+    if (leagues.length > 1) {
+      const lchips = el('div', 'chiprow');
+      for (const lg of leagues) {
+        const chip = el('button', `chip${state.oppLeague === lg ? ' on' : ''}`, lg);
+        activatable(chip, () => { state.oppLeague = lg; render(); }, { skipWhen: () => state.oppLeague === lg });
+        lchips.appendChild(chip);
+      }
+      panel.appendChild(lchips);
+    }
+
     const chips = el('div', 'chiprow');
     for (const o of doc.opponents.filter((o2) => o2.league === state.oppLeague)) {
       if (o.teamId === doc.club?.id) continue;
-      const chip = el('button', `chip${state.oppSel === o.teamId ? ' on' : ''}`, o.name);
+      const chip = el('button', `chip teamchip${state.oppSel === o.teamId ? ' on' : ''}`);
+      chip.appendChild(el('span', null, o.name));
+      chip.appendChild(el('i', 'stars5', teamStars(o)));
+      chip.dataset.tip = `A ${o.att ?? '—'} · M ${o.mid ?? '—'} · D ${o.def ?? '—'} · GK ${o.gk ?? '—'}`;
       activatable(chip, () => { state.oppSel = o.teamId; render(); }, { skipWhen: () => state.oppSel === o.teamId });
       chips.appendChild(chip);
     }
@@ -2615,6 +2635,60 @@ function campaignLadder(doc, type) {
   ];
 }
 
+/** Where the season stands: windows open and shut, and the missions follow. */
+function seasonPhase(doc) {
+  const m = doc.gameDate ? Math.floor(doc.gameDate / 100) % 100 : null;
+  if (m === null) return { id: 'unknown', label: 'Season in progress' };
+  if (m === 7 || m === 8) return { id: 'summer', label: 'Summer window — squad building' };
+  if (m === 1) return { id: 'winter', label: 'Winter window — one correction allowed' };
+  if (m === 6) return { id: 'review', label: 'Season review' };
+  if (m >= 2 && m <= 5) return { id: 'runin', label: 'The run-in — every point is a final' };
+  return { id: 'autumn', label: 'Autumn — the grind that decides May' };
+}
+
+/**
+ * Mini missions: 2-3 live conditions per campaign, re-cut for the phase of the
+ * season. Same rules as everything else — computed, never rolled.
+ */
+function campaignMissions(doc) {
+  const phase = seasonPhase(doc);
+  const cur = doc.seasons[doc.seasons.length - 1];
+  const out = [];
+  const push = (name, line, pct, done) => out.push({ name, line, pct: Math.max(0, Math.min(100, Math.round(pct))), done });
+  const ppg = cur && cur.played ? (cur.points ?? 0) / cur.played : null;
+  const gapg = cur && cur.played ? cur.goalsAgainst / cur.played : null;
+  const winRate = cur && cur.played ? cur.wins / cur.played : null;
+  const net = cur ? (cur.bigSell?.amount ?? 0) - (cur.bigBuy?.amount ?? 0) : 0;
+  const gaps = (doc.transfers?.gaps ?? []).filter((g) => g.severity !== 'none');
+  const totalMin = doc.stats.totalMinutes || 1;
+  const acadMin = doc.senior.filter((p2) => p2.isNewgen).reduce((a, p2) => a + (p2.minutesThisSeason ?? 0), 0);
+  const acadShare = acadMin / totalMin;
+  const windowOpen = phase.id === 'summer' || phase.id === 'winter';
+
+  const type = campaign.type;
+  if (type === 'wall') {
+    if (gapg !== null) push('Keep the door shut', `Concede under 0.9 a game — at ${gapg.toFixed(2)}.`, (0.9 / Math.max(gapg, 0.01)) * 100, gapg <= 0.9);
+    if (windowOpen && gaps.some((g) => ['GK', 'CB', 'FB'].includes(g.slot)))
+      push('Fix the back line', `The window is open and ${gaps.filter((g) => ['GK', 'CB', 'FB'].includes(g.slot)).map((g) => g.slot).join('/')} is thin.`, 0, false);
+    else if (windowOpen) push('Hold the wall together', 'No defensive gap — resist the shiny signing.', 100, true);
+  } else if (type === 'academy') {
+    push('Academy minutes', `${(acadShare * 100).toFixed(1)}% of all minutes to academy products — target 15%.`, (acadShare / 0.15) * 100, acadShare >= 0.15);
+    const pending = doc.alerts.filter((a) => a.tag === 'Sign to senior').length;
+    if (pending) push('Promotions pending', `${pending} academy deal${pending > 1 ? 's' : ''} to convert before they walk.`, 0, false);
+    else push('Nobody slips away', 'Every promotion case is handled.', 100, true);
+  } else if (type === 'moneyball') {
+    if (windowOpen) push('Green window', `Close this window net positive — currently ${net >= 0 ? '+' : ''}${moneyShort(net)}.`, net > 0 ? 100 : 50, net > 0);
+    const over = doc.wages.assessmentList.filter((a) => a.verdict === 'over').length;
+    push('No fat contracts', `${over} player${over === 1 ? '' : 's'} paid above the band.`, over === 0 ? 100 : Math.max(0, 100 - over * 20), over === 0);
+  } else if (type !== 'custom') {
+    if (ppg !== null) push('Title pace', `${(ppg * 38).toFixed(0)} points over 38 at this rate — hold 88+.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88);
+    if (winRate !== null && phase.id === 'runin') push('The run-in', `Win rate ${(winRate * 100).toFixed(0)}% — champions close at 70%+.`, (winRate / 0.7) * 100, winRate >= 0.7);
+    if (windowOpen && gaps.length) push('Cover the gaps', `${gaps.map((g) => g.slot).join(' · ')} thin while the window is open.`, 0, false);
+    else if (windowOpen) push('Squad complete', 'No line is thin — spend nothing you do not need to.', 100, true);
+  }
+  return { phase, missions: out };
+}
+
 function renderStory(doc) {
   const frag = document.createDocumentFragment();
 
@@ -2700,13 +2774,22 @@ function renderStory(doc) {
     rpg.appendChild(el('h2', null, `🎲 ${CAMPAIGNS[campaign.type].name}`));
     rpg.appendChild(el('p', 'muted tiny', `Season ${doc.season} of a 15-season career · ${CAMPAIGNS[campaign.type].blurb}`));
 
-    const chips = el('div', 'chiprow');
-    for (const [key, def] of Object.entries(CAMPAIGNS)) {
-      const chip = el('button', `chip${campaign.type === key ? ' on' : ''}`, def.name);
-      activatable(chip, () => { campaign.type = key; saveCampaign(); render(); }, { skipWhen: () => campaign.type === key });
-      chips.appendChild(chip);
+    const { phase, missions } = campaignMissions(doc);
+    rpg.appendChild(el('p', 'phasebanner', phase.label));
+    for (const c of missions) {
+      const row = el('div', 'quest');
+      const head2 = el('div', 'qhead');
+      head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
+      head2.appendChild(el('span', 'muted tiny', c.line));
+      row.appendChild(head2);
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill${c.done ? ' done' : ''}`);
+      fill.style.width = `${c.pct}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      rpg.appendChild(row);
     }
-    rpg.appendChild(chips);
+    if (missions.length) rpg.appendChild(el('p', 'muted tiny', 'Missions re-cut with the phase of the season: windows, the grind, the run-in. The campaign is chosen in Settings.'));
 
     const ladder = campaignLadder(doc, campaign.type);
     if (ladder) {
@@ -2821,17 +2904,17 @@ function renderOverview(doc) {
       const wdl = el('div', 'hero-line');
       const pace = cur.points !== null && cur.played > 0 && cur.played < 38 ? Math.round((cur.points / cur.played) * 38) : null;
       const heroStats = [
-        [cur.wins, 'won'],
-        [cur.draws, 'drawn'],
-        [cur.losses, 'lost'],
-        [cur.goalsFor, 'scored'],
-        [cur.goalsAgainst, 'conceded'],
-        [cur.points ?? '—', 'points'],
+        [cur.wins, 'won', 'h-up'],
+        [cur.draws, 'drawn', 'h-mid'],
+        [cur.losses, 'lost', 'h-down'],
+        [cur.goalsFor, 'scored', 'h-up'],
+        [cur.goalsAgainst, 'conceded', 'h-down'],
+        [cur.points ?? '—', 'points', ''],
       ];
-      if (pace !== null) heroStats.push([pace, 'pace / 38']);
-      heroStats.push([doc.stats.meanOverall ?? '—', 'squad'], [doc.stats.meanAge ?? '—', 'mean age']);
-      for (const [v2, l2] of heroStats) {
-        const cell = el('span', 'stat big');
+      if (pace !== null) heroStats.push([pace, 'pace / 38', '']);
+      heroStats.push([doc.stats.meanOverall ?? '—', 'squad', ''], [doc.stats.meanAge ?? '—', 'mean age', '']);
+      for (const [v2, l2, cls2] of heroStats) {
+        const cell = el('span', `stat big${cls2 ? ` ${cls2}` : ''}`);
         cell.appendChild(el('b', null, String(v2)));
         cell.appendChild(el('i', null, l2));
         wdl.appendChild(cell);
@@ -2971,9 +3054,16 @@ function renderDevelop(doc) {
   panel.appendChild(
     el('p', 'muted', 'Everyone with real growth left. Focus = the attributes where growth buys the most fit, from the fitted position weights and this world\u2019s percentiles — point the game\u2019s development plans there. The save does not expose the plans themselves.'),
   );
-  const pool = [...doc.senior, ...doc.academy]
-    .filter((p2) => (p2.headroom ?? 0) >= 2)
-    .sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0));
+  const everyone = [...doc.senior, ...doc.academy].sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0));
+  const growers = everyone.filter((p2) => (p2.headroom ?? 0) >= 2);
+  const modes2 = el('div', 'chiprow');
+  for (const [label, mode] of [[`Growth left ${growers.length}`, 'grow'], [`Everyone ${everyone.length}`, 'all']]) {
+    const chip = el('button', `chip${(state.devFilter ?? 'grow') === mode ? ' on' : ''}`, label);
+    activatable(chip, () => { state.devFilter = mode; render(); }, { skipWhen: () => (state.devFilter ?? 'grow') === mode });
+    modes2.appendChild(chip);
+  }
+  panel.appendChild(modes2);
+  const pool = state.devFilter === 'all' ? everyone : growers;
   panel.appendChild(
     table(
       [{ label: 'Pos', pos: true }, 'Player', { label: 'Age', num: true }, { label: 'Now', num: true }, { label: 'Ceiling', num: true }, { label: 'Left', num: true }, 'Trend', { label: 'Mins', num: true }, 'Focus'],
@@ -3068,6 +3158,30 @@ function renderSettings() {
     const txt = el('div', 'settext');
     txt.appendChild(el('b', null, def.label));
     txt.appendChild(el('span', 'muted tiny', def.note));
+    if (def.key === 'rpg' && settings.rpg) {
+      const chips = el('div', 'chiprow');
+      for (const [key, cdef] of Object.entries(CAMPAIGNS)) {
+        const chip = el('button', `chip${campaign.type === key ? ' on' : ''}`, cdef.name);
+        chip.dataset.tip = cdef.blurb;
+        activatable(chip, () => { campaign.type = key; saveCampaign(); render(); }, { skipWhen: () => campaign.type === key });
+        chips.appendChild(chip);
+      }
+      txt.appendChild(chips);
+      if (campaign.type === 'custom' && state.doc) {
+        const lchips = el('div', 'chiprow');
+        for (const c of rpgChallenges(state.doc)) {
+          const on = campaign.levers.includes(c.name);
+          const chip = el('button', `chip${on ? ' on' : ''}`, c.name);
+          activatable(chip, () => {
+            campaign.levers = on ? campaign.levers.filter((n2) => n2 !== c.name) : [...campaign.levers, c.name];
+            saveCampaign();
+            render();
+          });
+          lchips.appendChild(chip);
+        }
+        txt.appendChild(lchips);
+      }
+    }
     row.appendChild(txt);
     panel.appendChild(row);
   }

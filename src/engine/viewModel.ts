@@ -239,6 +239,8 @@ export interface ViewDocument {
     teamId: number;
     name: string;
     league: string;
+    /** The league's nation, for the flag-first picker. */
+    nation: string;
     /** True for clubs in your own division. */
     home: boolean;
     /** Mean overall of the best plausible XI (best GK + top ten outfield). */
@@ -1179,15 +1181,27 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   // Every club in every signable domestic league — you might face anyone in
   // Europe, so the scout is not fenced to your own division.
   const scoutClubs = eligibleClubs(rowsOf(tables, 'leagueteamlinks'), rowsOf(tables, 'leagues'), careerGender === 1);
+  // The signable set includes reserve competitions ("Youth Squad League") that
+  // no fixture list would ever pit you against — the scout skips them.
+  const leagueCountry = new Map<number, number>();
+  const youthLeagues = new Set<number>();
+  for (const l of rowsOf(tables, 'leagues')) {
+    const id = num(l, 'leagueid');
+    if (id === null) continue;
+    const c = num(l, 'countryid');
+    if (c !== null) leagueCountry.set(id, c);
+    const nm = l['leaguename'];
+    if (typeof nm === 'string' && /youth|reserve/i.test(nm)) youthLeagues.add(id);
+  }
   const leagueIdOfTeam = new Map<number, number>();
   for (const l of rowsOf(tables, 'leagueteamlinks')) {
     const t = num(l, 'teamid');
     const lg = num(l, 'leagueid');
-    if (t !== null && lg !== null && scoutClubs.has(t)) leagueIdOfTeam.set(t, lg);
+    if (t !== null && lg !== null && scoutClubs.has(t) && !youthLeagues.has(lg)) leagueIdOfTeam.set(t, lg);
   }
   const playersByClub = new Map<number, Row[]>();
   for (const [pid, teamId] of clubOf) {
-    if (!scoutClubs.has(teamId)) continue;
+    if (!leagueIdOfTeam.has(teamId)) continue;
     const row = players.get(pid);
     if (!row) continue;
     const list = playersByClub.get(teamId) ?? [];
@@ -1219,6 +1233,9 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         teamId,
         name: teamNames.get(teamId) ?? `team ${teamId}`,
         league: leagueNameOf.get(leagueIdOfTeam.get(teamId) ?? -1) ?? 'Unknown league',
+        nation:
+          (input.nations ?? new Map()).get(leagueCountry.get(leagueIdOfTeam.get(teamId) ?? -1) ?? -1) ??
+          'International',
         home: leagueIdOfTeam.get(teamId) === userLeagueId,
         overall: meanOf(xi.map((x) => x.overall)),
         gk: meanOf(gk.map((x) => x.overall)),
