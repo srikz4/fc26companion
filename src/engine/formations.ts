@@ -234,6 +234,18 @@ export function compareShapes(shapes: FormationShape[], squad: Candidate[]): Sha
     .sort((a, b) => (b.xi.today ?? 0) - (a.xi.today ?? 0));
 }
 
+/**
+ * Every team sheet the career has saved, in save order. The game lets a
+ * manager keep several; reading only row zero silently ignored the rest.
+ * `readSavedXI` below stays as "the first sheet" — the one the game treats
+ * as the default — and this gives the full list for display and scoring.
+ */
+export function readTeamSheets(mentalities: Row[], teamsheets: Row[]): SavedXI[] {
+  return mentalities
+    .map((_, i) => readSavedXI(mentalities.slice(i), teamsheets.slice(i)))
+    .filter((x): x is SavedXI => x !== null);
+}
+
 /** The XI actually saved in game, from `cm_mentalities`. */
 export interface SavedXI {
   tacticName: string | null;

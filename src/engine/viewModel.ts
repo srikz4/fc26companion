@@ -30,7 +30,7 @@ import {
   SQUAD_ROLE_LABELS,
 } from '../domain/attributes.ts';
 import { YOUTH_TEAM_ID } from '../core/saveLocation.ts';
-import { allFits, bestFit, calibrationReport, slotOf, type Slot } from './fit.ts';
+import { allFits, bestFit, calibrationReport, fitFor, slotOf, type Slot } from './fit.ts';
 import {
   buildSynergy,
   profileOf as synergyProfile,
@@ -55,6 +55,7 @@ import {
   pickXI,
   readFormations,
   readSavedXI,
+  readTeamSheets,
   type SavedXI,
   type SelectionDiff,
   type ShapeComparison,
@@ -233,6 +234,8 @@ export interface MatchdayView {
   recommended: XI | null;
   diff: SelectionDiff[];
   shapes: ShapeComparison[];
+  /** Every saved team sheet, scored: mean anchored fit of its XI in its own positions. */
+  sheets: { name: string; shapeName: string | null; players: number; today: number | null }[];
   unavailable: { playerId: number; name: string; reason: string }[];
   /** Calibration of our fit numbers against the game's ratings. */
   calibration: ReturnType<typeof calibrationReport>;
@@ -499,6 +502,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     .filter((c): c is NonNullable<typeof c> => c !== null);
 
   const savedXI = readSavedXI(rowsOf(tables, 'cm_mentalities'), rowsOf(tables, 'cm_teamsheets'));
+  const allSheets = readTeamSheets(rowsOf(tables, 'cm_mentalities'), rowsOf(tables, 'cm_teamsheets'));
   const savedShape =
     shapes.find((sh) => sh.formationId === savedXI?.formationId) ??
     shapes.find((sh) => sh.name === '4-2-3-1') ??
@@ -803,6 +807,22 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     recommended: recommendedXI,
     diff: selectionDiff,
     shapes: shapeTable,
+    sheets: allSheets.map((sheet) => {
+      const fits = sheet.players
+        .map((pl) => {
+          const row = players.get(pl.playerId);
+          const slot = slotOf(pl.positionCode);
+          if (!row || !slot) return null;
+          return fitFor(row, slot)?.value ?? null;
+        })
+        .filter((v): v is number => v !== null);
+      return {
+        name: sheet.tacticName ?? 'Unnamed sheet',
+        shapeName: shapes.find((sh) => sh.formationId === sheet.formationId)?.name ?? null,
+        players: sheet.players.length,
+        today: fits.length ? Math.round((fits.reduce((a, b) => a + b, 0) / fits.length) * 10) / 10 : null,
+      };
+    }),
     roles: recommendRoles({
       squad: seniorRows,
       minutes: minutesById,

@@ -1074,6 +1074,28 @@ function renderMatchday(doc) {
     }
     top.appendChild(roles);
   }
+  // Every saved team sheet, scored the same way: the game lets a manager keep
+  // several, and reading only the first silently ignored the rest.
+  if (m.sheets?.length > 1) {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, `Team sheets — ${m.sheets.length}`));
+    panel.appendChild(
+      table(
+        ['Sheet', 'Shape', { label: 'Players', num: true }, { label: 'Today', num: true }],
+        m.sheets.map((sh) => [
+          sh.name,
+          sh.shapeName ?? '—',
+          { text: sh.players, num: true },
+          { text: sh.today ?? '—', num: true, tier: sh.today },
+        ]),
+      ),
+    );
+    panel.appendChild(
+      el('p', 'muted tiny', 'Today = the mean rating of that sheet\u2019s eleven in its own positions. The pitch below always shows the first sheet, which the game treats as the default.'),
+    );
+    frag.appendChild(panel);
+  }
+
   if (m.recommended) {
     const meta = el('div', 'subhead');
     meta.appendChild(el('span', null, `Shape ${m.recommended.shape.name}`));
@@ -1256,7 +1278,7 @@ function renderSynergy(doc) {
         l.channel,
         `${nameOf(l.supplier)} → ${nameOf(l.receiver)}`,
         { text: l.strength, num: true, tier: l.strength },
-        { text: l.why, title: decompose(l) },
+        { text: l.why, title: decompose(l), cls: 'wrap' },
       ]),
     ),
   );
@@ -1321,6 +1343,7 @@ function renderSynergy(doc) {
           {
             text: u.perDuty.map((d) => `${d.duty}: ${nameOf(d.carrier).split(' ').pop()}`).join(' · '),
             title: u.perDuty.map((d) => `${d.duty}: ${nameOf(d.carrier)} ${d.covered}`).join('\n'),
+            cls: 'wrap',
           },
         ]),
       ),
@@ -1746,7 +1769,7 @@ function renderLoans(doc) {
               d.teamName,
               d.leagueName ?? '—',
               { text: d.clubOverall, num: true },
-              d.read,
+              { text: d.read, cls: 'wrap' },
             ]),
           ),
         );
@@ -1781,7 +1804,7 @@ function renderYouth(doc) {
           sc.mission ? `${sc.mission.positions.join(' / ') || '?'} in ${flagFor(sc.mission.nation)}${sc.mission.nation ?? '?'}` : 'idle',
           sc.mission?.returns ?? '—',
           { text: sc.mission?.cost ?? '—', num: true },
-          { text: sc.nextJob ?? 'Well placed.', title: sc.nextJob ?? undefined },
+          { text: sc.nextJob ?? 'Well placed.', title: sc.nextJob ?? undefined, cls: 'wrap' },
         ]),
       ),
     );

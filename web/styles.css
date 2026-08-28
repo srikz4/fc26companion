@@ -989,3 +989,19 @@ td.stars.m1 { color: var(--m1); }
   .todo { grid-template-columns: 1fr; gap: 2px; }
   .todo .why { white-space: normal; }
 }
+
+/* ============================================================ table discipline */
+
+/* Numbers align as numbers. */
+td.num { font-variant-numeric: tabular-nums; }
+
+/* Prose columns wrap inside a sane width instead of stretching the whole
+ * table until every other column's alignment falls apart. */
+td.wrap { white-space: normal; min-width: 14em; max-width: 26em; line-height: 1.35; }
+
+/* The sort arrow floats in reserved space; it no longer widens the header
+ * and nudges the column it labels. */
+th.sortable { padding-right: 20px; }
+th.sortable.on::after, th.sortable.on.asc::after {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+}
