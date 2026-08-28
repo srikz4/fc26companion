@@ -23,7 +23,13 @@
  */
 import type { Row } from '../parser/dbReader.ts';
 import type { HistoryStore } from '../store/store.ts';
-import type { PlayerTag } from '../store/tags.ts';
+/** Kept for the report shape; the tagging UI and store were removed. */
+export interface PlayerTag {
+  gameId: number;
+  tag: string;
+  note: string | null;
+  createdAt: string;
+}
 
 const numberOf = (row: Row | undefined, key: string): number | null =>
   typeof row?.[key] === 'number' ? (row[key] as number) : null;

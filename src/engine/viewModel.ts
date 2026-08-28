@@ -65,7 +65,6 @@ import { buildRegenReport, type RegenReport } from './regens.ts';
 import { recommendRoles, type RoleRecommendation } from './setpieces.ts';
 import { buildLoans, type LoansView } from './loans.ts';
 import { buildDealsModel, type DealsModel } from './deals.ts';
-import type { PlayerTag } from '../store/tags.ts';
 
 const num = (row: Row | undefined, key: string): number | null =>
   typeof row?.[key] === 'number' ? (row[key] as number) : null;
@@ -167,7 +166,6 @@ export interface PlayerView {
   generation: { overall: number; potential: number | null; peers: number } | null;
   /** Spread of his match ratings — low means he shows up every week. */
   ratingSpread: number | null;
-  tags: PlayerTag[];
   isNewgen: boolean;
   contractMonths: number | null;
   wageVerdict: string | null;
@@ -322,7 +320,6 @@ interface BuildInput {
   store?: HistoryStore | undefined;
   careerId?: number | undefined;
   nameTableSize?: number;
-  tags?: Map<number, PlayerTag[]> | undefined;
   /** nation id -> name, from data/nations_fc26.csv. Empty map shows ids. */
   nations?: Map<number, string>;
   /** competition code -> name, from data/competitions.csv. */
@@ -445,7 +442,6 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
 
 
   const nameOf = (id: number): string => resolver.resolve(id).display;
-  const tagIndex = input.tags ?? new Map<number, PlayerTag[]>();
 
   const seniorRows = seniorIds.map((id) => players.get(id)).filter((p): p is Row => p !== undefined);
   const academyRows = academyIds.map((id) => players.get(id)).filter((p): p is Row => p !== undefined);
@@ -739,7 +735,6 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
               ) * 10,
             ) / 10
           : null,
-      tags: tagIndex.get(id) ?? [],
       isNewgen: id >= 400_000,
       contractMonths: months,
       wageVerdict: wageAssessment?.verdict ?? null,
@@ -1116,7 +1111,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     gameDate: gameDate.date,
     nameOf,
     ageOf: (p) => ageAt(num(p, 'birthdate'), gameDate.date),
-    tags: tagIndex,
+    tags: new Map(), // the tagging UI and store were removed
     store: input.store,
     careerId: input.careerId,
   });

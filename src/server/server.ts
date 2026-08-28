@@ -18,11 +18,6 @@ export interface ViewProvider {
   get(): unknown;
 }
 
-export interface TagHandler {
-  add(gameId: number, tag: string, note: string | null): void;
-  remove(gameId: number, tag: string): void;
-}
-
 export interface ServerOptions {
   port: number;
   webRoot: string;
@@ -31,20 +26,6 @@ export interface ServerOptions {
   provider: ViewProvider;
   /** Bind address. Loopback unless the user opts into LAN. */
   host?: string;
-  /** Watchlist writes. Our own store only — never the save. */
-  tags?: TagHandler | undefined;
-}
-
-/** Small cap: this endpoint only ever receives a short JSON object. */
-async function readBody(req: IncomingMessage, limit = 8192): Promise<string> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > limit) throw new Error('body too large');
-    chunks.push(chunk as Buffer);
-  }
-  return Buffer.concat(chunks).toString('utf8');
 }
 
 const MIME: Record<string, string> = {
@@ -56,8 +37,7 @@ const MIME: Record<string, string> = {
 };
 
 export class ViewServer {
-  private readonly options: Omit<Required<ServerOptions>, 'tags' | 'facesRoot'> & {
-    tags?: TagHandler | undefined;
+  private readonly options: Omit<Required<ServerOptions>, 'facesRoot'> & {
     facesRoot?: string | undefined;
   };
   private readonly clients = new Set<ServerResponse>();
@@ -112,38 +92,6 @@ export class ViewServer {
         'cache-control': 'no-store',
       });
       res.end(body);
-      return;
-    }
-
-    // The only write endpoint in the app, and it writes to our store, never the
-    // save. Bound to loopback like everything else.
-    if (url.pathname === '/api/tag' && req.method === 'POST') {
-      if (!this.options.tags) {
-        res.writeHead(503, { 'content-type': 'application/json' });
-        res.end('{"error":"tags unavailable"}');
-        return;
-      }
-      const body = await readBody(req);
-      try {
-        const parsed = JSON.parse(body) as {
-          gameId?: number;
-          tag?: string;
-          note?: string | null;
-          remove?: boolean;
-        };
-        if (typeof parsed.gameId !== 'number' || typeof parsed.tag !== 'string') {
-          throw new Error('gameId and tag are required');
-        }
-        if (parsed.remove) this.options.tags.remove(parsed.gameId, parsed.tag);
-        else this.options.tags.add(parsed.gameId, parsed.tag, parsed.note ?? null);
-
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end('{"ok":true}');
-        this.broadcast('refresh', { reason: 'tag' });
-      } catch (error) {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'bad request' }));
-      }
       return;
     }
 

@@ -15,7 +15,6 @@ import { fileURLToPath } from 'node:url';
 import { loadDbMeta } from '../src/parser/meta.ts';
 import { parseSave, type Tables } from '../src/parser/dbReader.ts';
 import { HistoryStore, readCareerIdentity } from '../src/store/store.ts';
-import { TagStore } from '../src/store/tags.ts';
 import { SaveWatcher } from '../src/watcher/watcher.ts';
 import { listManagerCareerSaves, resolveSaveDirectory } from '../src/core/saveLocation.ts';
 import { createNameResolver, loadNameTable } from '../src/names/nameTable.ts';
@@ -76,7 +75,6 @@ async function main(): Promise<void> {
     }
   }
   const store = new HistoryStore(STORE_PATH);
-  const tagStore = new TagStore(store.handle);
 
   let view: ViewDocument | null = null;
   let activeCareerId: number | undefined;
@@ -114,7 +112,6 @@ async function main(): Promise<void> {
         store,
         careerId: activeCareerId,
         nameTableSize: names.byPlayerId.size,
-        tags: activeCareerId === undefined ? undefined : tagStore.index(activeCareerId),
         nations,
         competitions,
       });
@@ -135,18 +132,6 @@ async function main(): Promise<void> {
     webRoot: WEB_ROOT,
     facesRoot: join(root, 'data', 'faces'),
     provider: { get: () => view ?? { error: 'no save parsed yet' } },
-    tags: {
-      add: (gameId, tag, note) => {
-        if (activeCareerId === undefined) throw new Error('no career loaded yet');
-        tagStore.add(activeCareerId, gameId, tag, note);
-        rebuild();
-      },
-      remove: (gameId, tag) => {
-        if (activeCareerId === undefined) throw new Error('no career loaded yet');
-        tagStore.remove(activeCareerId, gameId, tag);
-        rebuild();
-      },
-    },
   });
 
   const watcher = new SaveWatcher({ saveDirectory, snapshotDirectory: SNAPSHOT_DIR, meta, store });

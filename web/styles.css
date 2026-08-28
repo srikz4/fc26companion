@@ -596,7 +596,9 @@ td.tier-cell.t2 { color: var(--t2); } td.tier-cell.t3 { color: var(--t3); } td.t
 
 /* ============================================================ master-detail */
 
-.split { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 14px; margin-top: 8px; align-items: start; }
+/* Wide enough that "Bruno Fernandes" plus a chip and months survive intact —
+ * 300px truncated half the squad to "M. de …". */
+.split { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 14px; margin-top: 8px; align-items: start; }
 /* No inner scroll container: with 35 rows overflowing 70vh, Chrome's
  * composited scroll layer painted every glyph in the list as a smudge
  * (layout and computed styles were fine — only the paint was wrong).
