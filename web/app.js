@@ -44,9 +44,43 @@ const settings = (() => {
 })();
 const saveSettings = () => localStorage.setItem('settings', JSON.stringify(settings));
 
+/**
+ * The transfer shortlist. The save has no shortlist table (verified — the
+ * game's own shortlist lives outside the database chunk), so this one is
+ * Companion's, kept in the browser. Each entry freezes the player's numbers
+ * at the moment of shortlisting, so the view can show drift since.
+ */
+const shortlist = (() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem('shortlist') || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+})();
+const saveShortlist = () => localStorage.setItem('shortlist', JSON.stringify(shortlist));
+const shortlisted = (id) => shortlist.some((x) => x.playerId === id);
+function toggleShortlist(x, gameDate) {
+  const i = shortlist.findIndex((e) => e.playerId === x.playerId);
+  if (i >= 0) shortlist.splice(i, 1);
+  else
+    shortlist.push({
+      playerId: x.playerId,
+      name: x.name,
+      club: x.teamName ?? null,
+      pos: x.posShort ?? x.slot ?? null,
+      overall: x.overall ?? null,
+      potential: x.potential ?? null,
+      fee: x.feeGuide?.mid ?? null,
+      added: gameDate ?? null,
+    });
+  saveShortlist();
+  render();
+}
+
 const state = {
   doc: null,
-  view: 'squad',
+  view: 'overview',
   sort: 'ingame',
   sortAsc: false,
   dwell: true,
@@ -656,15 +690,15 @@ function playerCard(p, onClose) {
     card.appendChild(styles);
   }
 
-  // --- small print
+  // --- the season in numbers: labelled blocks, not a run-on sentence
   const strip = el('div', 'strip');
   const add = (label, value, title) => {
     if (value === null || value === undefined || value === '') return;
-    const span = el('span');
-    if (title) span.title = title;
-    span.append(`${label} `);
-    span.appendChild(el('b', null, String(value)));
-    strip.appendChild(span);
+    const cell = el('span', 'stat');
+    if (title) cell.dataset.tip = title;
+    cell.appendChild(el('i', null, label));
+    cell.appendChild(el('b', null, String(value)));
+    strip.appendChild(cell);
   };
   add('Minutes', p.minutesThisSeason);
   add('Apps', p.appearances);
@@ -685,12 +719,22 @@ function playerCard(p, onClose) {
   add('Role', p.squadRole === 'None' ? null : p.squadRole);
   if (p.youth) add('In academy', p.youth.monthsInSquad === null ? null : fmtTerm(p.youth.monthsInSquad));
   if (p.synergy.length) {
-    add('Links', p.synergy.length, p.synergy.slice(0, 5).map((l) => l.evidence).join('\n'));
+    add(
+      'Synergy links',
+      p.synergy.length,
+      `Patterns connecting this player with squad mates, strongest first:\n` +
+        p.synergy.slice(0, 5).map((l) => l.evidence).join('\n'),
+    );
   }
   if (strip.childElementCount) card.appendChild(strip);
 
   const spark = sparkline(p.overallSeries);
-  if (spark) card.appendChild(spark);
+  if (spark) {
+    const box = el('div', 'sparkbox');
+    box.appendChild(el('span', 'lbl', 'OVERALL, THIS CAREER'));
+    box.appendChild(spark);
+    card.appendChild(box);
+  }
 
   const actions = el('div', 'rowacts');
   const toggle = el('button', 'ghost', state.open.has(p.playerId) ? 'Hide attributes' : 'Attributes');
@@ -804,7 +848,12 @@ function table(headers, rows, opts = {}) {
         .join(' ');
       const td = el('td', classes);
       const text = isObj ? cell.text : (cell ?? '—');
-      if (isObj && cell.cls === 'posbadge') td.appendChild(el('span', 'pos-pill', text));
+      if (isObj && cell.star) {
+        const b = el('button', `starbtn${cell.star.on ? ' on' : ''}`, cell.star.on ? '★' : '☆');
+        b.dataset.tip = cell.star.on ? 'On your shortlist — tap to drop' : 'Shortlist this player';
+        activatable(b, cell.star.onToggle);
+        td.appendChild(b);
+      } else if (isObj && cell.cls === 'posbadge') td.appendChild(el('span', 'pos-pill', text));
       else td.textContent = text;
       // A position column sorts by football order, never the alphabet —
       // "CB before CAM because C < B" is nobody's idea of a squad list.
@@ -1141,7 +1190,7 @@ function renderMatchday(doc) {
   // opponent's squad — pick who you play next and read the lines.
   if (doc.opponents?.length > 1) {
     const panel = el('div', 'panel');
-    panel.appendChild(el('h2', null, '🔎 Opponent scout'));
+    panel.appendChild(el('h2', null, settings.rpg ? '⚔ Boss scouting' : '🔎 Opponent scout'));
     panel.appendChild(
       el('p', 'muted tiny', 'The save has no fixture list, so pick the club you play next. Lines are the mean rating of their best XI: keeper, back four, middle four, front three.'),
     );
@@ -1561,8 +1610,9 @@ function renderTransfers(doc) {
   }
   targets.appendChild(
     table(
-      ['Player', 'Club', { label: 'Pos', pos: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Fit', num: true }, { label: 'Synergy', num: true }, { label: 'Age', num: true }, 'Fair fee', 'Why'],
+      ['', 'Player', 'Club', { label: 'Pos', pos: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Fit', num: true }, { label: 'Synergy', num: true }, { label: 'Age', num: true }, 'Fair fee', 'Why'],
       list.slice(0, 40).map((x) => [
+        { text: '', star: { on: shortlisted(x.playerId), onToggle: () => toggleShortlist(x, doc.gameDate) } },
         { text: x.name, title: x.teamName ? `currently at ${x.teamName}` : undefined },
         x.teamName ?? '—',
         { text: x.posShort ?? x.slot, cls: 'posbadge' },
@@ -2568,6 +2618,221 @@ function renderStory(doc) {
   return frag;
 }
 
+/** Deterministic campaign narration: chapter and arc from the record alone. */
+function campaignLine(doc) {
+  const cur = doc.seasons[doc.seasons.length - 1];
+  if (!cur || !cur.played) return null;
+  const ppg = cur.points !== null ? cur.points / cur.played : null;
+  const arc =
+    cur.losses === 0
+      ? 'an unbeaten season is alive — every match now carries it'
+      : ppg !== null && ppg >= 2.3
+        ? 'a title charge at full tilt'
+        : ppg !== null && ppg >= 1.9
+          ? 'in the hunt — one bad week from a crossroads'
+          : 'a rebuilding chapter, and the academy knows it';
+  return `Chapter ${doc.season}: ${cur.wins}W ${cur.draws}D ${cur.losses}L, ${cur.goalsFor}:${cur.goalsAgainst} — ${arc}.`;
+}
+
+function renderOverview(doc) {
+  const frag = document.createDocumentFragment();
+  const grid = el('div', 'grid');
+  const panel = (title, node, cls) => {
+    const p2 = el('div', `panel${cls ? ` ${cls}` : ''}`);
+    p2.appendChild(el('h2', null, title));
+    p2.appendChild(node);
+    grid.appendChild(p2);
+    return p2;
+  };
+  const go = (view) => {
+    const b = el('button', 'ghost tiny-btn', 'Open ›');
+    activatable(b, () => {
+      state.view = view;
+      localStorage.setItem('view', view);
+      render();
+    });
+    return b;
+  };
+
+  // --- the season, one line
+  const cur = doc.seasons[doc.seasons.length - 1];
+  {
+    const box = el('div');
+    if (settings.rpg) {
+      const line = campaignLine(doc);
+      if (line) box.appendChild(el('p', 'tipline', line));
+    }
+    if (cur) {
+      const wdl = el('div', 'hero-line');
+      const pace = cur.points !== null && cur.played > 0 && cur.played < 38 ? Math.round((cur.points / cur.played) * 38) : null;
+      for (const [v2, l2] of [
+        [`${cur.wins}W ${cur.draws}D ${cur.losses}L`, 'record'],
+        [cur.points ?? '—', 'points'],
+        [pace ?? '—', 'pace / 38'],
+        [`${cur.goalsFor}:${cur.goalsAgainst}`, 'goals'],
+        [doc.stats.meanOverall ?? '—', 'squad rating'],
+        [doc.stats.meanAge ?? '—', 'mean age'],
+      ]) {
+        const cell = el('span', 'stat big');
+        cell.appendChild(el('b', null, String(v2)));
+        cell.appendChild(el('i', null, l2));
+        wdl.appendChild(cell);
+      }
+      box.appendChild(wdl);
+    }
+    panel(`📈 Season ${doc.season}`, box, 'span2');
+  }
+
+  // --- what needs a decision
+  {
+    const box = el('div');
+    const alerts = doc.alerts.slice(0, 5);
+    for (const a of alerts) {
+      const row = el('div', 'todo');
+      row.appendChild(el('b', null, a.tag));
+      row.appendChild(el('span', 'who', a.playerName));
+      row.appendChild(el('span', 'why', a.line));
+      box.appendChild(row);
+    }
+    if (doc.alerts.length > 5) box.appendChild(el('p', 'muted tiny', `+${doc.alerts.length - 5} more in the rail.`));
+    if (!alerts.length) box.appendChild(el('p', 'muted tiny', 'Nothing needs you. Enjoy it.'));
+    panel(`🔔 Decisions — ${doc.alerts.length}`, box);
+  }
+
+  // --- movers
+  {
+    const box = el('div');
+    const everyone = [...doc.senior, ...doc.academy];
+    const movers = everyone
+      .filter((p2) => p2.trend === 'surge' || p2.trend === 'rise')
+      .sort((a, b) => (b.overallSeasonDelta ?? 0) - (a.overallSeasonDelta ?? 0))
+      .slice(0, 4);
+    const fallers = everyone.filter((p2) => p2.trend === 'dip' || p2.trend === 'fall').slice(0, 2);
+    for (const p2 of [...movers, ...fallers]) {
+      const row = el('div', 'todo');
+      const t2 = TREND[p2.trend];
+      row.appendChild(el('b', null, `${t2.glyph} ${p2.overallSeasonDelta > 0 ? '+' : ''}${p2.overallSeasonDelta}`));
+      row.appendChild(el('span', 'who', p2.name));
+      row.appendChild(el('span', 'why', `${p2.positionShort ?? ''} · ${p2.overall}${p2.potential && p2.potential !== p2.overall ? ` → ${p2.potential}` : ''}`));
+      box.appendChild(row);
+    }
+    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'No movement yet this season.'));
+    panel('📊 Movers', box);
+  }
+
+  // --- ceiling watch, contracts, loans: the pulse
+  {
+    const box = el('div');
+    const add2 = (label, who, why) => {
+      const row = el('div', 'todo');
+      row.appendChild(el('b', null, label));
+      row.appendChild(el('span', 'who', who));
+      row.appendChild(el('span', 'why', why));
+      box.appendChild(row);
+    };
+    for (const r of doc.stats.ceilingWatch.slice(0, 2)) {
+      add2('Ceiling', r.name, `${r.delta > 0 ? '+' : ''}${r.delta} this season`);
+    }
+    const dueNow = doc.wages.renewals.filter((r) => r.urgency === 'now');
+    if (dueNow.length) add2('Renewals', `${dueNow.length} due now`, 'Wages tab');
+    for (const r of (doc.loans.out ?? []).slice(0, 2)) {
+      add2('On loan', r.name, `Δ OVR ${r.overallDelta === null || r.overallDelta === undefined ? '—' : (r.overallDelta > 0 ? '+' : '') + r.overallDelta} at ${r.atTeamName ?? '?'}`);
+    }
+    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'Quiet on every front.'));
+    panel('🩺 Pulse', box);
+  }
+
+  // --- next opponent snapshot
+  {
+    const box = el('div');
+    const mine = doc.opponents?.find((o) => o.teamId === doc.club?.id);
+    const opp = doc.opponents?.find((o) => o.teamId === state.oppSel);
+    if (opp && mine) {
+      const row = el('div', 'hero-line');
+      for (const [l2, a, b] of [['XI', mine.overall, opp.overall], ['DEF', mine.def, opp.def], ['MID', mine.mid, opp.mid], ['ATT', mine.att, opp.att]]) {
+        const cell = el('span', 'stat big');
+        cell.appendChild(el('b', null, a !== null && b !== null ? `${a > b ? '+' : ''}${Math.round((a - b) * 10) / 10}` : '—'));
+        cell.appendChild(el('i', null, l2));
+        row.appendChild(cell);
+      }
+      box.appendChild(el('p', 'muted tiny', `Your edge, line by line, v ${opp.name}.`));
+      box.appendChild(row);
+    } else {
+      box.appendChild(el('p', 'muted tiny', 'Pick your next opponent on Matchday and the line-by-line edge lands here.'));
+    }
+    box.appendChild(go('matchday'));
+    panel(settings.rpg ? '⚔ Next fixture' : '🔎 Opponent', box);
+  }
+
+  // --- campaign challenges
+  if (settings.rpg) {
+    const box = el('div');
+    for (const c of rpgChallenges(doc).slice(0, 4)) {
+      const row = el('div', 'quest');
+      const head2 = el('div', 'qhead');
+      head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
+      head2.appendChild(el('span', 'muted tiny', `${c.pct}%`));
+      row.appendChild(head2);
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill${c.done ? ' done' : ''}`);
+      fill.style.width = `${c.pct}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      box.appendChild(row);
+    }
+    box.appendChild(go('story'));
+    panel('🎲 Campaign', box);
+  }
+
+  frag.appendChild(grid);
+  return frag;
+}
+
+function renderShortlist(doc) {
+  const frag = document.createDocumentFragment();
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, `⭐ Shortlist — ${shortlist.length}`));
+  if (!shortlist.length) {
+    panel.appendChild(
+      el('p', 'muted', 'Empty. Star players on the Transfers tab and they land here with their numbers frozen at that moment — the columns then show how far they have moved since.'),
+    );
+    frag.appendChild(panel);
+    return frag;
+  }
+  panel.appendChild(
+    el('p', 'muted tiny', 'Then = the day you shortlisted. Now = this save. Drift is the story: a rising OVR means the price is rising with it.'),
+  );
+  const liveById = new Map((doc.transfers?.targets ?? []).map((t2) => [t2.playerId, t2]));
+  panel.appendChild(
+    table(
+      ['', 'Player', 'Club', { label: 'Pos', pos: true }, { label: 'OVR then', num: true }, { label: 'OVR now', num: true }, { label: 'Δ', num: true }, { label: 'POT', num: true }, 'Fee then', 'Fee now', 'Added'],
+      shortlist.map((e) => {
+        const live = liveById.get(e.playerId);
+        const nowOvr = live?.overall ?? null;
+        const d = nowOvr !== null && e.overall !== null ? nowOvr - e.overall : null;
+        return [
+          { text: '', star: { on: true, onToggle: () => toggleShortlist(e, doc.gameDate) } },
+          e.name,
+          live?.teamName ?? e.club ?? '—',
+          { text: e.pos ?? '—', cls: 'posbadge' },
+          { text: e.overall ?? '—', num: true, tier: e.overall },
+          { text: nowOvr ?? '—', num: true, tier: nowOvr, title: nowOvr === null ? 'Off the current target list — no live read this snapshot' : undefined },
+          { text: d === null ? '—' : `${d > 0 ? '+' : ''}${d}`, num: true },
+          { text: live?.potential ?? e.potential ?? '—', num: true, tier: live?.potential ?? e.potential },
+          e.fee !== null ? moneyShort(e.fee) : '—',
+          live?.feeGuide?.mid ? moneyShort(live.feeGuide.mid) : '—',
+          e.added ? `~${fmtDate(e.added)}` : '—',
+        ];
+      }),
+    ),
+  );
+  panel.appendChild(
+    el('p', 'muted tiny', 'A dash under "now" means the player is outside the current 70-strong target scan this snapshot — the frozen numbers stay until you drop the star. Kept in this browser, never in the save.'),
+  );
+  frag.appendChild(panel);
+  return frag;
+}
+
 function renderSettings() {
   const frag = document.createDocumentFragment();
   const panel = el('div', 'panel');
@@ -2594,6 +2859,7 @@ function renderSettings() {
 }
 
 const VIEWS = {
+  overview: { label: 'Overview', render: renderOverview, count: () => null },
   matchday: { label: 'Matchday', render: renderMatchday, count: (d) => d.matchday.diff.filter((x) => x.savedPlayerId !== x.recommendedPlayerId).length },
   squad: { label: 'Squad', render: (d) => renderPlayers(d.senior), count: (d) => d.senior.length, players: true },
   youth: { label: 'Youth', render: renderYouth, count: (d) => d.academy.length, players: true },
@@ -2602,6 +2868,7 @@ const VIEWS = {
   wages: { label: 'Wages', render: renderWages, count: (d) => d.wages.renewals.length },
   loans: { label: 'Loans', render: renderLoans, count: (d) => d.loans.out.length + d.loans.candidates.length },
   stats: { label: 'Stats', render: renderStats, count: () => null },
+  shortlist: { label: 'Shortlist', render: renderShortlist, count: () => (shortlist.length || null) },
   story: { label: 'Story', render: renderStory, count: () => null },
   settings: { label: '⚙', render: renderSettings, count: () => null },
 };
