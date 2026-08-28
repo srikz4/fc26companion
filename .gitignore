@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# per-machine runtime state: snapshot history, tags, archived saves
+store/
+snapshots/
+
+# fetched at the user's request, never distributed (see README disclaimers)
+data/faces/
+
+# local AI-provider config would hold an API key (planned feature, docs/ai-features.md)
+config/ai.json
+
+# editor and OS noise
+.vscode/
+Thumbs.db
+Desktop.ini
+*.log
+
+# planned-feature spec kept local
+docs/ai-features.md
+
+# personal save-file exports (DB Browser scratch)
+exports/
+
+# living working notes, local only
+spec.md
+old/

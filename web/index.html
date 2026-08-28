@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Companion</title>
+    <script>/* data-theme bootstrap */try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">Companion</div>
+      <nav class="views" id="views"></nav>
+      <div class="meta">
+        <span id="club">—</span>
+        <span id="game-date" title="Estimated — the save has no live date field">—</span>
+        <span id="synced">never synced</span>
+        <div class="themeseg" id="themeseg" role="group" aria-label="Theme"></div>
+      </div>
+    </header>
+
+    <div class="filters" id="filters"></div>
+    <div class="rail collapsed" id="rail"></div>
+    <div id="warnings" class="warnings" hidden></div>
+
+    <main id="main" aria-live="polite">
+      <p class="empty">Waiting for the first save…</p>
+    </main>
+
+    <footer class="foot">
+      <span id="counts"></span>
+      <span class="key">
+        <i class="k1">&lt;80</i><i class="k2">80–84</i><i class="k3">85–89</i><i class="k4">90+</i>
+        <span>· the arrow shows the ceiling still reachable</span>
+        <span>· <b>~</b> derived, never drives advice</span>
+      </span>
+    </footer>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

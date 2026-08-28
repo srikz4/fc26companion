@@ -1,0 +1,48 @@
+{
+  "name": "fc26-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only second screen for EA SPORTS FC 26 Manager Career",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/srikz4/fc26companion.git"
+  },
+  "homepage": "https://github.com/srikz4/fc26companion#readme",
+  "bugs": {
+    "url": "https://github.com/srikz4/fc26companion/issues"
+  },
+  "keywords": [
+    "ea-sports-fc",
+    "fc26",
+    "career-mode",
+    "save-parser",
+    "companion-app",
+    "football",
+    "second-screen"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "probe": "tsx scripts/probe.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "import:names": "tsx scripts/importNames.ts",
+    "export:sqlite": "tsx scripts/exportSqlite.ts",
+    "watch": "tsx scripts/watch.ts",
+    "serve": "tsx scripts/serve.ts",
+    "import:faces": "tsx scripts/importFaces.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "fast-xml-parser": "^4.5.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.14.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2"
+  }
+}

@@ -1,0 +1,13 @@
+# Competition short codes -> names.
+# The save stores only codes; the `competition` table is cosmetics with no name
+# strings, and no FC25 tool carried a mapping either. These are the standard EA
+# competition codes as documented by the modding community, plus contextual
+# inference (an empty code on the club's primary objective is its league).
+# Unmapped codes display as-is — never guessed silently.
+code,name
+C201,FA Cup
+C202,EFL Cup
+C223,UEFA Champions League
+C224,UEFA Europa League
+C225,UEFA Conference League
+C228,Community Shield
