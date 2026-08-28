@@ -165,6 +165,8 @@ export interface PlayerView {
   bestSlot: string | null;
   synergy: ChannelLink[];
   /** Attributes in the top of the position's world population. */
+  /** Nation name from data/nations_fc26.csv; null when the id is unmapped. */
+  nation: string | null;
   standout: { attr: string; value: number; percentile: number }[];
   /** Where growth buys the most fit: heavy-weighted attributes below the position's 55th percentile. */
   developFocus: { attr: string; value: number; percentile: number }[];
@@ -236,6 +238,9 @@ export interface ViewDocument {
   opponents: {
     teamId: number;
     name: string;
+    league: string;
+    /** True for clubs in your own division. */
+    home: boolean;
     /** Mean overall of the best plausible XI (best GK + top ten outfield). */
     overall: number | null;
     gk: number | null;
@@ -782,6 +787,10 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       fits: fits.map((f) => ({ slot: f.slot, value: f.value, familiar: f.familiar })),
       bestSlot: best?.slot ?? null,
       synergy: synergyReport.byPlayer.get(id) ?? [],
+      nation: (() => {
+        const natId = num(player, 'nationality');
+        return natId !== null ? ((input.nations ?? new Map()).get(natId) ?? null) : null;
+      })(),
       standout: standoutAttributes(worldStats, slotOf(num(player, 'preferredposition1')), player),
       developFocus: (() => {
         const slot = slotOf(num(player, 'preferredposition1'));
@@ -790,8 +799,8 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
           .map(([attr, weight]) => {
             const value = num(player, attr);
             const pct = attributePercentile(worldStats, slot, attr, value);
-            if (value === null || pct === null || weight < 0.05 || pct >= 55) return null;
-            return { attr, value, percentile: pct, score: weight * (55 - pct) };
+            if (value === null || pct === null || weight < 0.04 || pct >= 65) return null;
+            return { attr, value, percentile: pct, score: weight * (65 - pct) };
           })
           .filter((x): x is NonNullable<typeof x> => x !== null)
           .sort((a, b) => b.score - a.score)
@@ -1167,16 +1176,18 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     }
     return null;
   })();
-  const leagueClubIds = new Set<number>();
+  // Every club in every signable domestic league — you might face anyone in
+  // Europe, so the scout is not fenced to your own division.
+  const scoutClubs = eligibleClubs(rowsOf(tables, 'leagueteamlinks'), rowsOf(tables, 'leagues'), careerGender === 1);
+  const leagueIdOfTeam = new Map<number, number>();
   for (const l of rowsOf(tables, 'leagueteamlinks')) {
-    if (num(l, 'leagueid') === userLeagueId) {
-      const t = num(l, 'teamid');
-      if (t !== null) leagueClubIds.add(t);
-    }
+    const t = num(l, 'teamid');
+    const lg = num(l, 'leagueid');
+    if (t !== null && lg !== null && scoutClubs.has(t)) leagueIdOfTeam.set(t, lg);
   }
   const playersByClub = new Map<number, Row[]>();
   for (const [pid, teamId] of clubOf) {
-    if (!leagueClubIds.has(teamId)) continue;
+    if (!scoutClubs.has(teamId)) continue;
     const row = players.get(pid);
     if (!row) continue;
     const list = playersByClub.get(teamId) ?? [];
@@ -1207,6 +1218,8 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       return {
         teamId,
         name: teamNames.get(teamId) ?? `team ${teamId}`,
+        league: leagueNameOf.get(leagueIdOfTeam.get(teamId) ?? -1) ?? 'Unknown league',
+        home: leagueIdOfTeam.get(teamId) === userLeagueId,
         overall: meanOf(xi.map((x) => x.overall)),
         gk: meanOf(gk.map((x) => x.overall)),
         def: meanOf(top('def', 4).map((x) => x.overall)),

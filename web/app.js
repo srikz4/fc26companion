@@ -89,6 +89,7 @@ const state = {
   wageSel: null,
   wageFilter: 'all',
   oppSel: null,
+  oppLeague: null,
   open: new Set(),
   attrs: new Set(),
   lastSync: null,
@@ -234,6 +235,25 @@ const TREND = {
   dip: { glyph: '↘', cls: 'tr-dip', word: 'dipping' },
   fall: { glyph: '▼', cls: 'tr-fall', word: 'falling' },
 };
+/**
+ * Sheet role codes, cracked against the game's own Tactics screen: every code
+ * is roleId*64 + focus. Confirmed on eleven assignments — Versatile read 10 on
+ * two different roles, Defend read 1 twice, both fullbacks shared one code.
+ * Unlisted ids render as "role N · focus M" until they are read off the screen.
+ */
+const ROLE_NAMES = {
+  65: 'Goalkeeper', 131: 'Fullback', 200: 'Stopper',
+  332: 'Deep-Lying Playmaker', 334: 'Playmaker', 531: 'Inside Forward', 599: 'Poacher',
+};
+const FOCUS_NAMES = { 1: 'Defend', 2: 'Balanced', 6: 'Aggressive', 8: 'Roaming', 10: 'Versatile' };
+function roleLabel(roleId, focus) {
+  if (roleId === null) return null;
+  const r = ROLE_NAMES[roleId];
+  const f = FOCUS_NAMES[focus];
+  if (r && f) return `${r} · ${f}`;
+  return `role ${roleId} · focus ${focus}~`;
+}
+
 function trendArrow(p) {
   if (!settings.trendArrows || !p.trend) return null;
   const t = TREND[p.trend];
@@ -585,6 +605,7 @@ function playerCard(p, onClose) {
 
   // --- one quiet line of facts
   const facts = el('div', 'facts');
+  if (p.nation) facts.appendChild(el('span', null, `${flagFor(p.nation)}${p.nation}`));
   for (const bit of [
     p.age !== null ? `${p.age}y` : null,
     p.preferredPositions.length > 1 ? p.preferredPositions.join(' / ') : null,
@@ -1091,6 +1112,12 @@ function renderPitch(xi, diff, byId, nameOf) {
     const who = a.playerId === null ? '—' : nameOf(a.playerId);
     pc.appendChild(el('div', 'pnm', who));
 
+    const sheetRole = (window.__doc?.matchday?.sheetRoles ?? []).find((r2) => r2.playerId === a.playerId);
+    if (sheetRole && sheetRole.roleId !== null) {
+      const rl = roleLabel(sheetRole.roleId, sheetRole.focus);
+      if (rl) pc.appendChild(el('div', 'prole', rl));
+    }
+
     // Age and form, which change week to week. The old "% of ceiling" bar read
     // 98-100% for every senior and told you nothing.
     if (p) {
@@ -1195,8 +1222,19 @@ function renderMatchday(doc) {
       el('p', 'muted tiny', 'The save has no fixture list, so pick the club you play next. Lines are the mean rating of their best XI: keeper, back four, middle four, front three.'),
     );
     const mine = doc.opponents.find((o) => o.teamId === doc.club?.id);
+    // League first, then club — you might face anyone in Europe.
+    const leagues = [...new Set(doc.opponents.map((o) => o.league))];
+    leagues.sort((a, b) => (a === mine?.league ? -1 : b === mine?.league ? 1 : a.localeCompare(b)));
+    if (!state.oppLeague || !leagues.includes(state.oppLeague)) state.oppLeague = mine?.league ?? leagues[0];
+    const lchips = el('div', 'chiprow');
+    for (const lg of leagues) {
+      const chip = el('button', `chip${state.oppLeague === lg ? ' on' : ''}`, lg);
+      activatable(chip, () => { state.oppLeague = lg; render(); }, { skipWhen: () => state.oppLeague === lg });
+      lchips.appendChild(chip);
+    }
+    panel.appendChild(lchips);
     const chips = el('div', 'chiprow');
-    for (const o of doc.opponents) {
+    for (const o of doc.opponents.filter((o2) => o2.league === state.oppLeague)) {
       if (o.teamId === doc.club?.id) continue;
       const chip = el('button', `chip${state.oppSel === o.teamId ? ' on' : ''}`, o.name);
       activatable(chip, () => { state.oppSel = o.teamId; render(); }, { skipWhen: () => state.oppSel === o.teamId });
@@ -2502,6 +2540,81 @@ function rpgChallenges(doc) {
   return out;
 }
 
+/** Campaign selection persists across sessions; 'custom' keeps chosen levers. */
+const campaign = (() => {
+  try {
+    return { type: 'rtg', levers: [], ...JSON.parse(localStorage.getItem('campaign') || '{}') };
+  } catch {
+    return { type: 'rtg', levers: [] };
+  }
+})();
+const saveCampaign = () => localStorage.setItem('campaign', JSON.stringify(campaign));
+
+const CAMPAIGNS = {
+  rtg: { name: 'Road to Glory', blurb: 'Climb until the biggest trophies stop being dreams.' },
+  wall: { name: 'The Wall', blurb: 'Build the meanest defence this save has ever recorded.' },
+  academy: { name: 'Academy Project', blurb: 'A first team grown, not bought.' },
+  moneyball: { name: 'Moneyball', blurb: 'Win while the books stay green.' },
+  custom: { name: 'Custom', blurb: 'Your levers, your rules.' },
+};
+
+/**
+ * Career-long milestone ladders, computed from the whole recorded history —
+ * seasons, trophies, the squad — so the arc runs toward the end of a 15-season
+ * career instead of resetting every August.
+ */
+function campaignLadder(doc, type) {
+  const seasons = doc.seasons ?? [];
+  const finished = seasons.filter((x) => (x.position ?? 0) > 0);
+  const bestPos = finished.length ? Math.min(...finished.map((x) => x.position)) : null;
+  const titles = finished.filter((x) => x.position === 1).length + (doc.board?.competitions ?? []).filter((c) => c.won && c.name.includes('Premier League')).length;
+  const cupsWon = (doc.board?.competitions ?? []).filter((c) => c.won && !c.name.includes('League') && !c.name.includes('Champions')).length;
+  const uclWon = (doc.board?.competitions ?? []).some((c) => c.won && c.name.includes('Champions'));
+  const gaSeasons = finished.map((x) => ({ s: x.season, ga: x.played ? x.goalsAgainst / x.played : 99 }));
+  const underOne = gaSeasons.filter((x) => x.ga < 1).length;
+  const newgens = doc.senior.filter((p2) => p2.isNewgen);
+  const xi = (doc.matchday?.recommended?.assignments ?? []).map((a) => a.playerId);
+  const xiNewgens = doc.senior.filter((p2) => p2.isNewgen && xi.includes(p2.playerId)).length;
+  const netBySeason = seasons.map((x) => (x.bigSell?.amount ?? 0) - (x.bigBuy?.amount ?? 0));
+  const netPositive = netBySeason.filter((n) => n > 0).length;
+
+  const M = (name, done, detail) => ({ name, done, detail });
+  if (type === 'wall')
+    return [
+      M('A season under 1.0 conceded a game', underOne >= 1, `${underOne} so far`),
+      M('A season under 0.8', gaSeasons.some((x) => x.ga < 0.8), gaSeasons.length ? `best ${Math.min(...gaSeasons.map((x) => x.ga)).toFixed(2)}` : 'no full season yet'),
+      M('Back-to-back mean seasons', underOne >= 2, `${underOne} of 2`),
+      M('Thirty or fewer conceded in a full season', finished.some((x) => x.goalsAgainst <= 30), ''),
+      M('Five mean seasons across the career', underOne >= 5, `${underOne} of 5`),
+    ];
+  if (type === 'academy')
+    return [
+      M('An academy product in the best XI', xiNewgens >= 1, `${xiNewgens} there now`),
+      M('Three in the best XI', xiNewgens >= 3, `${xiNewgens} of 3`),
+      M('An academy product reaches 85', newgens.some((p2) => (p2.overall ?? 0) >= 85), newgens.length ? `best ${Math.max(...newgens.map((p2) => p2.overall ?? 0))}` : 'none promoted yet'),
+      M('Five academy products in the senior squad', newgens.length >= 5, `${newgens.length} of 5`),
+      M('The armband on an academy product', doc.senior.some((p2) => p2.isNewgen && (doc.matchday?.roles ?? []).some((r2) => r2.role === 'Captain' && r2.currentId === p2.playerId)), ''),
+    ];
+  if (type === 'moneyball')
+    return [
+      M('A net-positive window', netPositive >= 1, `${netPositive} seasons in the green`),
+      M('Back-to-back green seasons', netPositive >= 2, `${netPositive} of 2`),
+      M('A record sale triple the record buy', seasons.some((x) => (x.bigSell?.amount ?? 0) > 3 * Math.max(x.bigBuy?.amount ?? 0, 1)), ''),
+      M('Career books in the green', netBySeason.reduce((a, b) => a + b, 0) > 0, moneyShort(netBySeason.reduce((a, b) => a + b, 0)) + ' career net'),
+      M('A title with green books', netBySeason.reduce((a, b) => a + b, 0) > 0 && titles >= 1, ''),
+    ];
+  if (type === 'custom') return null;
+  return [
+    M('Finish in the top half', bestPos !== null && bestPos <= 10, bestPos ? `best: ${ordinal(bestPos)}` : 'no finished season yet'),
+    M('Top four', bestPos !== null && bestPos <= 4, ''),
+    M('Runner-up', bestPos !== null && bestPos <= 2, ''),
+    M('Champions', titles >= 1, titles ? `${titles} title${titles > 1 ? 's' : ''}` : ''),
+    M('A domestic cup', cupsWon >= 1, ''),
+    M('Champions League', uclWon, ''),
+    M('Back-to-back titles', titles >= 2, `${titles} of 2`),
+  ];
+}
+
 function renderStory(doc) {
   const frag = document.createDocumentFragment();
 
@@ -2584,21 +2697,63 @@ function renderStory(doc) {
 
   if (settings.rpg) {
     const rpg = el('div', 'panel');
-    rpg.appendChild(el('h2', null, '🎲 Campaign challenges'));
-    for (const c of rpgChallenges(doc)) {
-      const row = el('div', 'quest');
-      const head2 = el('div', 'qhead');
-      head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
-      head2.appendChild(el('span', 'muted tiny', c.line));
-      row.appendChild(head2);
-      const track = el('div', 'btrack');
-      const fill = el('div', `bfill${c.done ? ' done' : ''}`);
-      fill.style.width = `${c.pct}%`;
-      track.appendChild(fill);
-      row.appendChild(track);
-      rpg.appendChild(row);
+    rpg.appendChild(el('h2', null, `🎲 ${CAMPAIGNS[campaign.type].name}`));
+    rpg.appendChild(el('p', 'muted tiny', `Season ${doc.season} of a 15-season career · ${CAMPAIGNS[campaign.type].blurb}`));
+
+    const chips = el('div', 'chiprow');
+    for (const [key, def] of Object.entries(CAMPAIGNS)) {
+      const chip = el('button', `chip${campaign.type === key ? ' on' : ''}`, def.name);
+      activatable(chip, () => { campaign.type = key; saveCampaign(); render(); }, { skipWhen: () => campaign.type === key });
+      chips.appendChild(chip);
     }
-    rpg.appendChild(el('p', 'muted tiny', 'Live conditions computed from this save — a challenge reads done while the condition holds. Persistent completion history arrives with the story ledger.'));
+    rpg.appendChild(chips);
+
+    const ladder = campaignLadder(doc, campaign.type);
+    if (ladder) {
+      let nextNamed = false;
+      for (const m of ladder) {
+        const row = el('div', `mile${m.done ? ' done' : ''}`);
+        let mark = m.done ? '✓' : '·';
+        if (!m.done && !nextNamed) { mark = '▸'; nextNamed = true; row.classList.add('next'); }
+        row.appendChild(el('i', 'mk2', mark));
+        row.appendChild(el('b', null, m.name));
+        if (m.detail) row.appendChild(el('span', 'muted tiny', m.detail));
+        rpg.appendChild(row);
+      }
+      const next = ladder.find((m) => !m.done);
+      rpg.appendChild(
+        el('p', 'tipline', next ? `The arc points at: ${next.name.toLowerCase()}.` : 'The ladder is complete. Write your own ending.'),
+      );
+    } else {
+      // custom: pick levers from the live pool
+      rpg.appendChild(el('p', 'muted tiny', 'Pick your levers — each is a live condition computed from the save.'));
+      const pool = rpgChallenges(doc);
+      const lchips = el('div', 'chiprow');
+      for (const c of pool) {
+        const on = campaign.levers.includes(c.name);
+        const chip = el('button', `chip${on ? ' on' : ''}`, c.name);
+        activatable(chip, () => {
+          campaign.levers = on ? campaign.levers.filter((n2) => n2 !== c.name) : [...campaign.levers, c.name];
+          saveCampaign();
+          render();
+        });
+        lchips.appendChild(chip);
+      }
+      rpg.appendChild(lchips);
+      for (const c of pool.filter((c2) => campaign.levers.includes(c2.name))) {
+        const row = el('div', 'quest');
+        const head2 = el('div', 'qhead');
+        head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
+        head2.appendChild(el('span', 'muted tiny', c.line));
+        row.appendChild(head2);
+        const track = el('div', 'btrack');
+        const fill = el('div', `bfill${c.done ? ' done' : ''}`);
+        fill.style.width = `${c.pct}%`;
+        track.appendChild(fill);
+        row.appendChild(track);
+        rpg.appendChild(row);
+      }
+    }
     side.appendChild(rpg);
   }
 
@@ -2665,14 +2820,17 @@ function renderOverview(doc) {
     if (cur) {
       const wdl = el('div', 'hero-line');
       const pace = cur.points !== null && cur.played > 0 && cur.played < 38 ? Math.round((cur.points / cur.played) * 38) : null;
-      for (const [v2, l2] of [
-        [`${cur.wins}W ${cur.draws}D ${cur.losses}L`, 'record'],
+      const heroStats = [
+        [cur.wins, 'won'],
+        [cur.draws, 'drawn'],
+        [cur.losses, 'lost'],
+        [cur.goalsFor, 'scored'],
+        [cur.goalsAgainst, 'conceded'],
         [cur.points ?? '—', 'points'],
-        [pace ?? '—', 'pace / 38'],
-        [`${cur.goalsFor}:${cur.goalsAgainst}`, 'goals'],
-        [doc.stats.meanOverall ?? '—', 'squad rating'],
-        [doc.stats.meanAge ?? '—', 'mean age'],
-      ]) {
+      ];
+      if (pace !== null) heroStats.push([pace, 'pace / 38']);
+      heroStats.push([doc.stats.meanOverall ?? '—', 'squad'], [doc.stats.meanAge ?? '—', 'mean age']);
+      for (const [v2, l2] of heroStats) {
         const cell = el('span', 'stat big');
         cell.appendChild(el('b', null, String(v2)));
         cell.appendChild(el('i', null, l2));
@@ -2764,27 +2922,86 @@ function renderOverview(doc) {
     panel(settings.rpg ? '⚔ Next fixture' : '🔎 Opponent', box);
   }
 
-  // --- campaign challenges
+  // --- the campaign arc, at a glance
   if (settings.rpg) {
     const box = el('div');
-    for (const c of rpgChallenges(doc).slice(0, 4)) {
-      const row = el('div', 'quest');
-      const head2 = el('div', 'qhead');
-      head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
-      head2.appendChild(el('span', 'muted tiny', `${c.pct}%`));
-      row.appendChild(head2);
+    const ladder = campaignLadder(doc, campaign.type);
+    if (ladder) {
+      const done = ladder.filter((m) => m.done).length;
       const track = el('div', 'btrack');
-      const fill = el('div', `bfill${c.done ? ' done' : ''}`);
-      fill.style.width = `${c.pct}%`;
+      const fill = el('div', `bfill${done === ladder.length ? ' done' : ''}`);
+      fill.style.width = `${Math.round((done / ladder.length) * 100)}%`;
       track.appendChild(fill);
-      row.appendChild(track);
-      box.appendChild(row);
+      box.appendChild(el('p', 'muted tiny', `${CAMPAIGNS[campaign.type].name} — ${done} of ${ladder.length} milestones, season ${doc.season} of 15.`));
+      box.appendChild(track);
+      const next = ladder.find((m) => !m.done);
+      if (next) box.appendChild(el('p', 'tipline', `Next: ${next.name}${next.detail ? ` (${next.detail})` : ''}.`));
+    } else {
+      for (const c of rpgChallenges(doc).filter((c2) => campaign.levers.includes(c2.name)).slice(0, 4)) {
+        const row = el('div', 'quest');
+        const head2 = el('div', 'qhead');
+        head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
+        head2.appendChild(el('span', 'muted tiny', `${c.pct}%`));
+        row.appendChild(head2);
+        const track = el('div', 'btrack');
+        const fill = el('div', `bfill${c.done ? ' done' : ''}`);
+        fill.style.width = `${c.pct}%`;
+        track.appendChild(fill);
+        row.appendChild(track);
+        box.appendChild(row);
+      }
     }
     box.appendChild(go('story'));
     panel('🎲 Campaign', box);
   }
 
   frag.appendChild(grid);
+  return frag;
+}
+
+/**
+ * The development board. The save holds no development-plan data (verified,
+ * §10) — this is the board you SET plans from: who has growth left, where each
+ * player's growth buys the most, and whether the minutes are arriving.
+ */
+function renderDevelop(doc) {
+  const frag = document.createDocumentFragment();
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, '🌱 Development board'));
+  panel.appendChild(
+    el('p', 'muted', 'Everyone with real growth left. Focus = the attributes where growth buys the most fit, from the fitted position weights and this world\u2019s percentiles — point the game\u2019s development plans there. The save does not expose the plans themselves.'),
+  );
+  const pool = [...doc.senior, ...doc.academy]
+    .filter((p2) => (p2.headroom ?? 0) >= 2)
+    .sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0));
+  panel.appendChild(
+    table(
+      [{ label: 'Pos', pos: true }, 'Player', { label: 'Age', num: true }, { label: 'Now', num: true }, { label: 'Ceiling', num: true }, { label: 'Left', num: true }, 'Trend', { label: 'Mins', num: true }, 'Focus'],
+      pool.map((p2) => {
+        const t2 = p2.trend ? TREND[p2.trend] : null;
+        return [
+          { text: p2.positionShort ?? '—', cls: 'posbadge' },
+          p2.name,
+          { text: p2.age ?? '—', num: true },
+          { text: p2.overall ?? '—', num: true, tier: p2.overall },
+          { text: p2.potential ?? '—', num: true, tier: p2.potential },
+          { text: p2.headroom ?? '—', num: true },
+          t2 ? `${t2.glyph} ${p2.overallSeasonDelta > 0 ? '+' : ''}${p2.overallSeasonDelta}` : '—',
+          { text: p2.minutesThisSeason ?? 0, num: true, title: (p2.minutesThisSeason ?? 0) < 300 ? 'Under 300 minutes — growth stalls without games' : undefined },
+          {
+            text: p2.developFocus?.length
+              ? p2.developFocus.map((d) => `${prettyAttr(d.attr)} ${d.value}`).join(' · ')
+              : 'balanced — minutes are the lever',
+            cls: 'wrap',
+            title: p2.developFocus?.length
+              ? p2.developFocus.map((d) => `${prettyAttr(d.attr)}: ${d.percentile}th percentile for the position`).join('\n')
+              : undefined,
+          },
+        ];
+      }),
+    ),
+  );
+  frag.appendChild(panel);
   return frag;
 }
 
@@ -2863,6 +3080,7 @@ const VIEWS = {
   matchday: { label: 'Matchday', render: renderMatchday, count: (d) => d.matchday.diff.filter((x) => x.savedPlayerId !== x.recommendedPlayerId).length },
   squad: { label: 'Squad', render: (d) => renderPlayers(d.senior), count: (d) => d.senior.length, players: true },
   youth: { label: 'Youth', render: renderYouth, count: (d) => d.academy.length, players: true },
+  develop: { label: 'Develop', render: renderDevelop, count: (d) => [...d.senior, ...d.academy].filter((p2) => (p2.headroom ?? 0) >= 2).length },
   synergy: { label: 'Synergy', render: renderSynergy, count: (d) => d.synergy.partnerships.length },
   transfers: { label: 'Transfers', render: renderTransfers, count: (d) => d.transfers.targets.length },
   wages: { label: 'Wages', render: renderWages, count: (d) => d.wages.renewals.length },
@@ -2983,6 +3201,7 @@ ${a.evidence}  [${a.rule}]`;
 }
 
 function render() {
+  window.__doc = state.doc;
   // The game saves constantly while you play and every save re-renders this
   // page — without restoring scroll, a phone reading a player card snaps back
   // to the top mid-read and the lower groups look like they never render.

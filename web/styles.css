@@ -980,15 +980,16 @@ td.stars.m1 { color: var(--m1); }
 /* ============================================================ the to-do list */
 
 .todo {
-  display: grid; grid-template-columns: 9.5em minmax(0, 1fr) auto;
+  display: grid; grid-template-columns: 8.5em 11em minmax(0, 1fr);
   gap: 10px; align-items: baseline;
   padding: 7px 0; border-bottom: 1px solid var(--line-soft);
   font-size: 14px;
 }
+.todo .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .todo:last-of-type { border-bottom: none; }
 .todo b { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--brand); }
 .todo .who { font-weight: 650; }
-.todo .why { font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+.todo .why { font-size: 12px; color: var(--ink-faint); }
 @media (max-width: 700px) {
   .todo { grid-template-columns: 1fr; gap: 2px; }
   .todo .why { white-space: normal; }
@@ -1089,3 +1090,21 @@ th.sortable.on::after, th.sortable.on.asc::after {
 }
 .starbtn:hover { color: var(--m5); }
 .starbtn.on { color: var(--m5); }
+
+/* ============================================================ roles on the pitch */
+
+.prole { font-size: 10px; color: var(--brand); margin-top: 1px; letter-spacing: 0.02em; }
+
+/* ============================================================ campaign ladder */
+
+.mile {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 6px 0; border-bottom: 1px solid var(--line-soft);
+  font-size: 14px;
+}
+.mile:last-of-type { border-bottom: none; }
+.mile .mk2 { font-style: normal; width: 1.1em; color: var(--ink-faint); flex: none; }
+.mile.done b { color: var(--ink-dim); text-decoration: line-through; text-decoration-color: var(--brand-line); }
+.mile.done .mk2 { color: var(--brand); }
+.mile.next b { color: var(--brand); }
+.mile.next .mk2 { color: var(--brand); }
