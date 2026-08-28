@@ -769,22 +769,13 @@ function playerCard(p, onClose) {
   });
   actions.appendChild(toggle);
 
-  if (notable.length) {
-    const why = el('button', 'ghost', 'Why');
-    activatable(
-      why,
-      () => {
-        card.classList.toggle('notes-open');
-        why.firstChild.textContent = card.classList.contains('notes-open') ? 'Hide why' : 'Why';
-      },
-      { skipWhen: () => card.classList.contains('notes-open') },
-    );
-    actions.appendChild(why);
-  }
   card.appendChild(actions);
 
+  // The reasoning is part of the card, not something to ask for: every call
+  // the rules made, with the numbers that made it.
   if (notable.length) {
     const panel = el('div', 'notes');
+    panel.appendChild(el('span', 'lbl', 'WHY THESE CALLS'));
     for (const a of notable) {
       const row = el('div', `note ${a.severity}`);
       row.appendChild(el('b', null, a.tag));
@@ -2417,6 +2408,13 @@ function storySvg(doc) {
   const parts = [];
   const t = (x, y, text, size, fill, weight = 400, anchor = 'start', spacing = '') =>
     parts.push(`<text x="${x}" y="${y}" font-family="${FONT}" font-size="${size}" fill="${fill}" font-weight="${weight}" text-anchor="${anchor}"${spacing ? ` letter-spacing="${spacing}"` : ''}>${escXml(text)}</text>`);
+  // Rich line: segments with their own colour and weight, one <text> of tspans.
+  const seg = (x, y, size, segments) =>
+    parts.push(
+      `<text x="${x}" y="${y}" font-family="${FONT}" font-size="${size}">` +
+        segments.map((sg) => `<tspan fill="${sg.fill}" font-weight="${sg.w ?? 600}"${sg.dx ? ` dx="${sg.dx}"` : ''}>${escXml(sg.t)}</tspan>`).join('') +
+        `</text>`,
+    );
 
   parts.push(`<rect width="${W}" height="${H}" fill="#0b0f14"/>`);
   parts.push(`<rect x="0" y="0" width="${W}" height="6" fill="${ACCENT}"/>`);
@@ -2433,28 +2431,43 @@ function storySvg(doc) {
     t(64, y, 'TROPHY CABINET', 22, DIM, 700, 'start', '0.15em');
     y += 42;
     for (const tr of f.trophies.slice(0, 4)) {
-      t(64, y, `🏆 ${tr.name} — season ${tr.season}`, 28, INK, 600);
+      seg(64, y, 28, [
+        { t: '🏆 ', fill: ACCENT },
+        { t: tr.name, fill: INK, w: 800 },
+        { t: `  season ${tr.season}`, fill: DIM, w: 600 },
+      ]);
       y += 40;
     }
     y += 8;
   } else {
-    t(64, y, 'TROPHY CABINET — empty so far. The story is still being written.', 22, DIM, 600);
+    seg(64, y, 22, [
+      { t: 'TROPHY CABINET  ', fill: DIM, w: 700 },
+      { t: 'empty — the hunger is the story.', fill: ACCENT, w: 600 },
+    ]);
     y += 46;
   }
 
-  // Season records
+  // Season records: won green, drawn grey, lost red, scored green, conceded
+  // red — the record reads at a glance instead of as one white sentence.
+  const GREEN = '#4ade80';
+  const RED = '#f87171';
   t(64, y, 'THE RECORD', 22, DIM, 700, 'start', '0.15em');
   y += 44;
   for (const sn of f.seasons.slice(-5)) {
     const pos = ordinal(sn.position);
-    const line = [
-      `S${sn.season}`,
-      pos ? `${pos} place` : 'in progress',
-      `${sn.wins}W ${sn.draws}D ${sn.losses}L`,
-      `${sn.points} pts`,
-      `${sn.goalsFor}:${sn.goalsAgainst}`,
-    ].join('   ·   ');
-    t(64, y, line, 30, INK, 600);
+    const champion = sn.position === 1;
+    seg(64, y, 30, [
+      { t: `S${sn.season}`, fill: ACCENT, w: 800 },
+      { t: champion ? '  🏆 CHAMPIONS' : pos ? `  ${pos}` : '  live', fill: champion ? ACCENT : DIM, w: 700, dx: 6 },
+      { t: `  ${sn.wins}W`, fill: GREEN, w: 800, dx: 18 },
+      { t: ` ${sn.draws}D`, fill: DIM, w: 700 },
+      { t: ` ${sn.losses}L`, fill: RED, w: 800 },
+      { t: `  ${sn.points}`, fill: INK, w: 800, dx: 18 },
+      { t: ' pts', fill: DIM, w: 600 },
+      { t: `  ${sn.goalsFor}`, fill: GREEN, w: 800, dx: 18 },
+      { t: ':', fill: DIM, w: 600 },
+      { t: `${sn.goalsAgainst}`, fill: RED, w: 800 },
+    ]);
     y += 46;
   }
   y += 18;
@@ -2572,7 +2585,11 @@ const saveCampaign = () => localStorage.setItem('campaign', JSON.stringify(campa
 
 const CAMPAIGNS = {
   rtg: { name: 'Road to Glory', blurb: 'Climb until the biggest trophies stop being dreams.' },
+  treble: { name: 'The Treble', blurb: 'League, cup and Europe — in one impossible season.' },
+  invincible: { name: 'Invincibles', blurb: 'A season nobody beats you.' },
+  century: { name: 'Century Club', blurb: 'Goals until the nets complain.' },
   wall: { name: 'The Wall', blurb: 'Build the meanest defence this save has ever recorded.' },
+  youthrev: { name: 'Youth Revolution', blurb: 'The youngest team in the land, and the best.' },
   academy: { name: 'Academy Project', blurb: 'A first team grown, not bought.' },
   moneyball: { name: 'Moneyball', blurb: 'Win while the books stay green.' },
   custom: { name: 'Custom', blurb: 'Your levers, your rules.' },
@@ -2585,6 +2602,7 @@ const CAMPAIGNS = {
  */
 function campaignLadder(doc, type) {
   const seasons = doc.seasons ?? [];
+  const cur2 = seasons[seasons.length - 1] ?? null;
   const finished = seasons.filter((x) => (x.position ?? 0) > 0);
   const bestPos = finished.length ? Math.min(...finished.map((x) => x.position)) : null;
   const titles = finished.filter((x) => x.position === 1).length + (doc.board?.competitions ?? []).filter((c) => c.won && c.name.includes('Premier League')).length;
@@ -2623,6 +2641,63 @@ function campaignLadder(doc, type) {
       M('Career books in the green', netBySeason.reduce((a, b) => a + b, 0) > 0, moneyShort(netBySeason.reduce((a, b) => a + b, 0)) + ' career net'),
       M('A title with green books', netBySeason.reduce((a, b) => a + b, 0) > 0 && titles >= 1, ''),
     ];
+  if (type === 'invincible') {
+    const minLosses = finished.length ? Math.min(...finished.map((x) => x.losses)) : null;
+    const curL = cur2 && cur2.played ? cur2.losses : null;
+    return [
+      M('A season of five losses or fewer', (minLosses !== null && minLosses <= 5) || (curL !== null && cur2.played >= 30 && curL <= 5), minLosses !== null ? `best: ${minLosses} losses` : ''),
+      M('Twenty games into a season unbeaten', cur2 !== null && cur2.played >= 20 && cur2.losses === 0, cur2 ? `${cur2.losses} losses after ${cur2.played}` : ''),
+      M('A two-loss season', minLosses !== null && minLosses <= 2, ''),
+      M('The unbeaten season', (minLosses !== null && minLosses === 0) || (cur2 !== null && cur2.played >= 38 && cur2.losses === 0), ''),
+      M('Do it while champions', false, 'unbeaten and the title, same season'),
+    ];
+  }
+  if (type === 'century') {
+    const bestGf = finished.length ? Math.max(...finished.map((x) => x.goalsFor)) : 0;
+    const gfNow = cur2?.goalsFor ?? 0;
+    const centuries = finished.filter((x) => x.goalsFor >= 100).length + (gfNow >= 100 ? 1 : 0);
+    const careerGoals = seasons.reduce((a, x) => a + (x.goalsFor ?? 0), 0);
+    return [
+      M('Eighty in a season', bestGf >= 80 || gfNow >= 80, `best ${Math.max(bestGf, gfNow)}`),
+      M('The century', centuries >= 1, ''),
+      M('A hundred and twenty', bestGf >= 120 || gfNow >= 120, ''),
+      M('Back-to-back centuries', centuries >= 2, `${centuries} of 2`),
+      M('Five hundred career goals', careerGoals >= 500, `${careerGoals} so far`),
+    ];
+  }
+  if (type === 'youthrev') {
+    const u21 = doc.senior.filter((p2) => (p2.age ?? 99) <= 21).length;
+    const xiAges = (doc.matchday?.recommended?.assignments ?? [])
+      .map((a) => doc.senior.find((p2) => p2.playerId === a.playerId)?.age)
+      .filter((a) => a !== null && a !== undefined);
+    const xiMean = xiAges.length ? xiAges.reduce((a, b) => a + b, 0) / xiAges.length : null;
+    const teenXI = xiAges.some((a) => a <= 19);
+    return [
+      M('Six under-21s in the senior squad', u21 >= 6, `${u21} of 6`),
+      M('A best XI averaging under 24', xiMean !== null && xiMean < 24, xiMean !== null ? `now ${xiMean.toFixed(1)}` : ''),
+      M('A teenager in the best XI', teenXI, ''),
+      M('Under 23 on average', xiMean !== null && xiMean < 23, ''),
+      M('Youngest squad, top four', xiMean !== null && xiMean < 24 && bestPos !== null && bestPos <= 4, ''),
+    ];
+  }
+  if (type === 'treble') {
+    const leagueWon = titles >= 1;
+    const cupWon = cupsWon >= 1;
+    const wonBySeason = new Map();
+    for (const c of doc.board?.competitions ?? []) {
+      if (!c.won) continue;
+      wonBySeason.set(c.season, (wonBySeason.get(c.season) ?? 0) + 1);
+    }
+    const doubleSeason = [...wonBySeason.values()].some((n2) => n2 >= 2);
+    const trebleSeason = [...wonBySeason.values()].some((n2) => n2 >= 3);
+    return [
+      M('Win the league', leagueWon, ''),
+      M('Win a domestic cup', cupWon, ''),
+      M('Win the Champions League', uclWon, ''),
+      M('A double — two trophies, one season', doubleSeason, ''),
+      M('THE TREBLE', trebleSeason, 'all three, one season'),
+    ];
+  }
   if (type === 'custom') return null;
   return [
     M('Finish in the top half', bestPos !== null && bestPos <= 10, bestPos ? `best: ${ordinal(bestPos)}` : 'no finished season yet'),
@@ -2680,13 +2755,46 @@ function campaignMissions(doc) {
     if (windowOpen) push('Green window', `Close this window net positive — currently ${net >= 0 ? '+' : ''}${moneyShort(net)}.`, net > 0 ? 100 : 50, net > 0);
     const over = doc.wages.assessmentList.filter((a) => a.verdict === 'over').length;
     push('No fat contracts', `${over} player${over === 1 ? '' : 's'} paid above the band.`, over === 0 ? 100 : Math.max(0, 100 - over * 20), over === 0);
+  } else if (type === 'invincible') {
+    if (cur) push('Zero column', `${cur.losses} ${cur.losses === 1 ? 'loss' : 'losses'} after ${cur.played} — keep the zero.`, cur.losses === 0 ? 100 : 0, cur.losses === 0);
+    if (winRate !== null) push('Kill the draws', `Draws are survivable, losses are not — win rate ${(winRate * 100).toFixed(0)}%.`, (winRate / 0.65) * 100, winRate >= 0.65);
+  } else if (type === 'century') {
+    if (cur) {
+      const nextMark = Math.ceil(Math.max(cur.goalsFor + 1, 20) / 20) * 20;
+      push(`Reach ${nextMark}`, `${cur.goalsFor} scored — next stop ${nextMark}.`, (cur.goalsFor / nextMark) * 100, false);
+      if (cur.played) push('Three a game', `${(cur.goalsFor / cur.played).toFixed(1)} per game — hold 3.0.`, ((cur.goalsFor / cur.played) / 3) * 100, cur.goalsFor / cur.played >= 3);
+    }
+  } else if (type === 'youthrev') {
+    const xiAges = (doc.matchday?.recommended?.assignments ?? [])
+      .map((a) => doc.senior.find((p2) => p2.playerId === a.playerId)?.age)
+      .filter((a2) => a2 !== null && a2 !== undefined);
+    const xiMean = xiAges.length ? xiAges.reduce((a2, b) => a2 + b, 0) / xiAges.length : null;
+    if (xiMean !== null) push('Keep it young', `Best XI averages ${xiMean.toFixed(1)} — stay under 24.`, (24 / Math.max(xiMean, 1)) * 100, xiMean < 24);
+    if (windowOpen) push('Sign the future', 'Window rule: nobody over 24 comes in.', 50, false);
+  } else if (type === 'treble') {
+    const alive = (doc.board?.competitions ?? []).filter((c) => c.season === doc.season && !c.won && c.result === -1 && !c.notStarted).length;
+    push('Stay alive everywhere', `${alive} competition${alive === 1 ? '' : 's'} still running — lose none of them.`, alive > 0 ? 100 : 0, alive >= 2);
+    if (ppg !== null) push('League pace', `${(ppg * 38).toFixed(0)}-point pace — the treble starts with the title.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88);
   } else if (type !== 'custom') {
     if (ppg !== null) push('Title pace', `${(ppg * 38).toFixed(0)} points over 38 at this rate — hold 88+.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88);
     if (winRate !== null && phase.id === 'runin') push('The run-in', `Win rate ${(winRate * 100).toFixed(0)}% — champions close at 70%+.`, (winRate / 0.7) * 100, winRate >= 0.7);
     if (windowOpen && gaps.length) push('Cover the gaps', `${gaps.map((g) => g.slot).join(' · ')} thin while the window is open.`, 0, false);
     else if (windowOpen) push('Squad complete', 'No line is thin — spend nothing you do not need to.', 100, true);
   }
-  return { phase, missions: out };
+  // Micro: one-save-away nudges from the leaders' own numbers.
+  const micro = [];
+  const scorer = (doc.stats.topScorers ?? [])[0];
+  if (scorer) {
+    const nextS = Math.ceil((scorer.goals + 1) / 5) * 5;
+    micro.push({ name: `${scorer.name.split(' ').pop()} to ${nextS}`, line: `${scorer.goals} goals — ${nextS - scorer.goals} to the next mark.`, pct: Math.round((scorer.goals / nextS) * 100), done: false });
+  }
+  const rated = (doc.stats.bestRated ?? [])[0];
+  if (rated && rated.apps >= 5) micro.push({ name: 'Keep the standard', line: `${rated.name.split(' ').pop()} averages ${rated.rating.toFixed(1)} — hold 8.0+.`, pct: Math.min(100, Math.round((rated.rating / 8) * 100)), done: rated.rating >= 8 });
+  const starved = [...doc.senior, ...doc.academy]
+    .filter((p2) => (p2.age ?? 99) <= 21 && (p2.headroom ?? 0) >= 5 && (p2.minutesThisSeason ?? 0) < 300)
+    .sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0))[0];
+  if (starved) micro.push({ name: `Minutes for ${starved.name.split(' ').pop()}`, line: `${starved.minutesThisSeason ?? 0}' so far — get to 300 before June.`, pct: Math.round(((starved.minutesThisSeason ?? 0) / 300) * 100), done: (starved.minutesThisSeason ?? 0) >= 300 });
+  return { phase, missions: out, micro };
 }
 
 function renderStory(doc) {
@@ -2774,7 +2882,7 @@ function renderStory(doc) {
     rpg.appendChild(el('h2', null, `🎲 ${CAMPAIGNS[campaign.type].name}`));
     rpg.appendChild(el('p', 'muted tiny', `Season ${doc.season} of a 15-season career · ${CAMPAIGNS[campaign.type].blurb}`));
 
-    const { phase, missions } = campaignMissions(doc);
+    const { phase, missions, micro } = campaignMissions(doc);
     rpg.appendChild(el('p', 'phasebanner', phase.label));
     for (const c of missions) {
       const row = el('div', 'quest');
@@ -2789,7 +2897,23 @@ function renderStory(doc) {
       row.appendChild(track);
       rpg.appendChild(row);
     }
-    if (missions.length) rpg.appendChild(el('p', 'muted tiny', 'Missions re-cut with the phase of the season: windows, the grind, the run-in. The campaign is chosen in Settings.'));
+    if (micro.length) {
+      rpg.appendChild(el('span', 'lbl-row', 'MICRO'));
+      for (const c of micro) {
+        const row = el('div', 'quest micro');
+        const head2 = el('div', 'qhead');
+        head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
+        head2.appendChild(el('span', 'muted tiny', c.line));
+        row.appendChild(head2);
+        const track = el('div', 'btrack');
+        const fill = el('div', `bfill${c.done ? ' done' : ''}`);
+        fill.style.width = `${Math.max(0, Math.min(100, c.pct))}%`;
+        track.appendChild(fill);
+        row.appendChild(track);
+        rpg.appendChild(row);
+      }
+    }
+    if (missions.length) rpg.appendChild(el('p', 'muted tiny', 'Phase missions re-cut with the season — windows, the grind, the run-in — micro missions with every save. The campaign is chosen in Settings.'));
 
     const ladder = campaignLadder(doc, campaign.type);
     if (ladder) {

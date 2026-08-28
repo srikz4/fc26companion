@@ -311,8 +311,13 @@ main { padding: 14px 16px 64px; }
 
 .rowacts { margin-top: 9px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
-.notes { display: none; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
-.card.notes-open .notes { display: grid; gap: 7px; }
+.notes {
+  display: grid; gap: 7px;
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+  background: var(--panel-2);
+}
+.notes .lbl { font-size: 10px; letter-spacing: 0.08em; color: var(--ink-faint); font-weight: 700; }
 .note { font-size: 13px; display: grid; gap: 1px; }
 .note b { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
 .note.urgent b { color: var(--urgent); }
@@ -589,8 +594,8 @@ td.tier-cell.t2 { color: var(--t2); } td.tier-cell.t3 { color: var(--t3); } td.t
   /* Keep pad, position pill, face, name, rating, age; the rest waits for
    * the card. (This block once predated the pad/face columns and sheared
    * the whole grid.) */
-  .rrow, .rhead { grid-template-columns: 18px 3.4em 28px minmax(0, 1fr) 8.5em 3em; }
-  .rrow .rdelta, .rrow .rmarks, .rrow .act, .rrow .rmins { display: none; }
+  .rrow, .rhead { grid-template-columns: 18px 3.4rem 28px minmax(0, 1fr) 8.5rem 3rem; }
+  .rrow .rdelta, .rrow .rmarks, .rrow .act, .rrow .rquiet, .rrow .rmins { display: none; }
   .rhead span:nth-child(n + 7) { display: none; }
 }
 
@@ -675,7 +680,7 @@ td.tier-cell.t2 { color: var(--t2); } td.tier-cell.t3 { color: var(--t3); } td.t
   align-self: center;
 }
 .rrow .dwellpad { grid-column: auto; margin-right: -4px; }
-.rrow { grid-template-columns: 18px 2.6em minmax(140px, 1.2fr) auto 3em 2.8em 3.4em minmax(90px, auto) 3.4em; }
+/* superseded: tracks unified in rem near the end of this sheet */
 .dwellpad:hover, .dwelling .dwellpad { border-color: var(--brand); }
 .srow .dwellpad { margin-right: 2px; }
 
@@ -719,7 +724,7 @@ td.tier-cell.t2 { color: var(--t2); } td.tier-cell.t3 { color: var(--t3); } td.t
 .face img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 .face .initials { font-size: 10px; font-weight: 800; color: var(--ink-faint); }
 
-.rrow { grid-template-columns: 18px 2.6em 28px minmax(130px, 1.2fr) auto 3em 2.8em 3.4em minmax(90px, auto) 3.4em; }
+/* superseded: tracks unified in rem near the end of this sheet */
 
 /* ============================================================ roster header + sortable tables */
 
@@ -824,8 +829,8 @@ th.sortable, .rhead span { white-space: nowrap; }
 /* Fixed tracks, identical for header and every row. The old `auto` tracks
  * sized independently per row, so each row drew its own private columns and
  * the whole roster shredded out of alignment. */
-.rrow { grid-template-columns: 18px 3.4em 28px minmax(130px, 1fr) 9.5em 3em 3.6em 3.4em 10em 3.4em; }
-.rhead { grid-template-columns: 18px 3.4em 28px minmax(130px, 1fr) 9.5em 3em 3.6em 3.4em 10em 3.4em; }
+.rrow { grid-template-columns: 18px 3.4rem 28px minmax(130px, 1fr) 9.5rem 3rem 3.6rem 3.4rem 10rem 3.4rem; }
+.rhead { grid-template-columns: 18px 3.4rem 28px minmax(130px, 1fr) 9.5rem 3rem 3.6rem 3.4rem 10rem 3.4rem; }
 .roster { max-width: 1500px; }
 .roster .rkey { margin: 6px 2px 0; }
 
@@ -904,10 +909,10 @@ td.stars.m1 { color: var(--m1); }
   /* No pointer rest on touch — the dwell lead-zones are dead weight. */
   .dwellpad { display: none; }
   .rhead span:first-child { display: none; }
-  .rrow, .rhead { grid-template-columns: 3.4em 28px minmax(130px, 1.2fr) auto 3em 2.8em 3.4em minmax(90px, auto) 3.4em; }
+  .rrow, .rhead { grid-template-columns: 3.4rem 28px minmax(130px, 1fr) 9.5rem 3rem 3.6rem 3.4rem 10rem 3.4rem; }
 }
 @media (hover: none) and (max-width: 700px) {
-  .rrow, .rhead { grid-template-columns: 3.4em 28px minmax(0, 1fr) 8.5em 3em; }
+  .rrow, .rhead { grid-template-columns: 3.4rem 28px minmax(0, 1fr) 8.5rem 3rem; }
 }
 
 /* ============================================================ wages rows */
@@ -1144,3 +1149,9 @@ th.sortable.on::after, th.sortable.on.asc::after {
 main > * { animation: rise 0.18s ease-out; }
 @keyframes rise { from { opacity: 0.4; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { main > * { animation: none; } }
+
+/* ============================================================ campaign tiers */
+
+.lbl-row { display: block; font-size: 10px; letter-spacing: 0.08em; color: var(--ink-faint); font-weight: 700; margin: 10px 0 2px; }
+.quest.micro .qhead b { font-size: 13px; }
+.quest.micro .btrack { height: 5px; }
