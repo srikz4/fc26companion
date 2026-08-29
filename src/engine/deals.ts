@@ -46,6 +46,23 @@ export interface FeeEstimate {
   high: number;
   /** How many observed deals the model stands on. */
   sample: number;
+  /**
+   * True when the player sits outside the range of profiles this world has
+   * actually traded, so the number is the curve continued past its evidence
+   * rather than a reading of it.
+   *
+   * It is offered because a labelled guess beats a blank, and because the shape
+   * of the market is still information. It is labelled because the curve is
+   * exponential and a rating or two beyond the data moves the answer by tens of
+   * millions — on the save this was built against, extrapolating to a
+   * ninety-rated player put him at 115M when the selling club would have taken
+   * 74M. Read it as an order of magnitude, and trust the floor more than the
+   * middle.
+   */
+  extrapolated: boolean;
+  /** The best-evidenced rating either side, so the screen can say how far out it is. */
+  evidenceFrom: number;
+  evidenceTo: number;
 }
 
 export interface DealsModel {
@@ -60,6 +77,19 @@ export interface DealsModel {
 
 const fmtDate = (n: number | null): string | null =>
   n === null ? null : String(n).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+
+/**
+ * Bound a fitted value without flattening it.
+ *
+ * A hard cap keeps the exponential from running to billions, but it also makes
+ * every player past the evidence read the same number, which looks broken and
+ * hides the ordering the model is still sure about. Saturating instead of
+ * clipping keeps values well inside the cap untouched, and squeezes the rest
+ * toward it while preserving which of two players is dearer.
+ */
+function softCap(v: number, cap: number): number {
+  return cap * (1 - Math.exp(-v / cap));
+}
 
 /** Gaussian elimination for the tiny normal-equations system. */
 function solve(A: number[][], b: number[]): number[] | null {
@@ -188,13 +218,19 @@ export function buildDealsModel(
     const sample = points.length;
 
     return (overall, age, potential) => {
-      if (overall > maxOverall + 2 || overall < minOverall - 4) return null;
+      const beyond = overall > maxOverall + 2 || overall < minOverall - 4;
       const mid = Math.exp(coef[0]! + coef[1]! * overall + coef[2]! * age + coef[3]! * potential);
+      // Inside the evidence the cap is a safety rail. Outside it, the cap IS
+      // the answer's ceiling — without it the exponential runs to billions.
+      const ceiling = beyond ? cap * 2.5 : cap;
       return {
-        low: roundTo(Math.min(mid * Math.exp(-sd), cap)),
-        mid: roundTo(Math.min(mid, cap)),
-        high: roundTo(Math.min(mid * Math.exp(sd), cap)),
+        low: roundTo(softCap(mid * Math.exp(-sd), ceiling)),
+        mid: roundTo(softCap(mid, ceiling)),
+        high: roundTo(softCap(mid * Math.exp(sd), ceiling)),
         sample,
+        extrapolated: beyond,
+        evidenceFrom: minOverall,
+        evidenceTo: maxOverall,
       };
     };
   };
@@ -244,16 +280,21 @@ export function buildDealsModel(
       };
 
       estimate = (overall, age, potential) => {
-        // Interpolation only: outside the band of players this market has
-        // actually priced, say nothing rather than something exponential.
-        if (overall > maxOverall + 2 || overall < minOverall - 4) return null;
+        // Beyond the band of players this market has actually priced, the curve
+        // is continued rather than refused — but it says so, because an
+        // exponential a rating or two past its evidence is a guess with a
+        // confident face on it.
+        const beyond = overall > maxOverall + 2 || overall < minOverall - 4;
         const mid = Math.exp(coef[0]! + coef[1]! * overall + coef[2]! * age + coef[3]! * potential);
-        const cap = maxFee * 1.6;
+        const cap = maxFee * (beyond ? 4 : 1.6);
         return {
-          low: round(Math.min(mid * Math.exp(-sd), cap)),
-          mid: round(Math.min(mid, cap)),
-          high: round(Math.min(mid * Math.exp(sd), cap)),
+          low: round(softCap(mid * Math.exp(-sd), cap)),
+          mid: round(softCap(mid, cap)),
+          high: round(softCap(mid * Math.exp(sd), cap)),
           sample,
+          extrapolated: beyond,
+          evidenceFrom: minOverall,
+          evidenceTo: maxOverall,
         };
       };
     }

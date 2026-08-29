@@ -2315,16 +2315,29 @@ function negotiationRows(sel) {
   }
   const spread = g.high > g.low ? Math.round(((g.high - g.low) / g.mid) * 100) : 0;
   const w = sel?.wageGuide;
+  /**
+   * Beyond the evidence, the curve is still shown — but never quietly.
+   *
+   * Nobody in this world has bought a ninety-rated player, so the model has
+   * nothing to read for one; continuing the curve is a guess, and an
+   * exponential guess at that. It is worth having as an order of magnitude, and
+   * worth flagging on every line so it is never mistaken for a reading.
+   */
+  const beyond = g.extrapolated;
+  const caveat = beyond
+    ? ` Extrapolated: this world has only priced players rated ${g.evidenceFrom}–${g.evidenceTo}, and he is outside that. Treat it as an order of magnitude and trust the floor more than the middle.`
+    : '';
+  const tag = (label) => (beyond ? `${label} ~` : label);
   const rows = [
-    ['Open at', moneyShort(g.low), `The least this world has paid for a player of his profile, across ${g.sample} completed deals. A first offer, not an insult.`],
-    ['Likely to take', moneyShort(g.mid), 'The middle of what this world pays for this profile. Budget for this.'],
-    ['Over the odds above', moneyShort(g.high), `Past this you are paying more than any comparable deal in this world. The band is ${spread}% wide on ${g.sample} deals — treat it as a direction, not a price tag.`],
+    [tag('Open at'), moneyShort(g.low), `The least this world has paid for a player of his profile, across ${g.sample} completed deals. A first offer, not an insult.${caveat}`],
+    [tag('Likely to take'), moneyShort(g.mid), `The middle of what this world pays for this profile. Budget for this.${caveat}`],
+    [tag('Over the odds above'), moneyShort(g.high), `Past this you are paying more than any comparable deal in this world. The band is ${spread}% wide on ${g.sample} deals — treat it as a direction, not a price tag.${caveat}`],
   ];
   // The fee is only half a signing. A wage is agreed in the same negotiation
   // and comes from the same completed deals, so it is priced the same way.
   if (w) {
     rows.push(
-      ['Wage he expects', `${moneyShort(w.mid)}/wk`, `What this world pays a player of his profile, from the wages on ${w.sample} completed deals.`],
+      [w.extrapolated ? 'Wage he expects ~' : 'Wage he expects', `${moneyShort(w.mid)}/wk`, `What this world pays a player of his profile, from the wages on ${w.sample} completed deals.${w.extrapolated ? ` Extrapolated — no wage here has been agreed for a player rated outside ${w.evidenceFrom}–${w.evidenceTo}.` : ''}`],
       ['Wage room', `${moneyShort(w.low)}–${moneyShort(w.high)}/wk`, 'The low end is worth trying first; past the high end you are bidding against nobody.'],
     );
   } else {
