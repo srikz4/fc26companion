@@ -30,6 +30,10 @@ const SETTING_DEFS = [
   { key: 'rail', group: 'Display', label: 'Alert rail', note: 'The "Needs attention" strip of rule-driven actions.', on: true },
   { key: 'actionChips', group: 'Display', label: 'Action chips on rosters', note: 'LOAN OUT / SIGN TO SENIOR chips on squad and academy rows.', on: true },
   { key: 'trendArrows', group: 'Display', label: 'Trend arrows', note: 'Season-form arrows next to each rating change: ▲ surge, ↗ rise, — flat, ↘ dip, ▼ fall.', on: true },
+  { key: 'faces', group: 'Display', label: 'Player faces', note: 'Locally imported headshots on rows and cards; off shows initials discs everywhere.', on: true },
+  { key: 'treatment', group: 'Central', label: 'Treatment room', note: 'Injured and suspended players with recovery time and a computed stand-in each.', on: true },
+  { key: 'leagueTable', group: 'Central', label: 'League table', note: 'Your division\u2019s live table, straight from the save, your row highlighted.', on: true },
+  { key: 'newsFeed', group: 'Central', label: 'Around the world', note: 'The save\u2019s own event feed — transfers and news across this world.', on: true },
   { key: 'developFocus', group: 'Guidance', label: 'Development focus', note: 'On the player card: the attributes where growth buys the most, from the fit weights and this world\u2019s percentiles. Point the game\u2019s development plans at them.', on: true },
   { key: 'absurd', group: 'Guidance', label: 'The absurd bit', note: 'The cheeky lines on the Story card.', on: true },
   { key: 'rpg', group: 'Modes', label: 'RPG mode', note: 'Career-as-campaign: live challenges computed from your save, with progress. Deterministic — every number is real.', on: false },
@@ -154,6 +158,11 @@ function tier(value) {
 function faceOf(p, size = 28) {
   const wrap = el('span', 'face');
   wrap.style.width = wrap.style.height = `${size}px`;
+  if (!settings.faces) {
+    const initials = (p.name || '?').split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('');
+    wrap.appendChild(el('span', 'initials', initials.toUpperCase()));
+    return wrap;
+  }
   const img = document.createElement('img');
   img.src = `/faces/${p.playerId}.png`;
   img.alt = '';
@@ -3442,7 +3451,7 @@ function renderCentral(doc) {
   }
 
   // --- treatment room: who is out and who steps in
-  {
+  if (settings.treatment) {
     const t2 = doc.treatment ?? { injured: [], suspended: [] };
     const box = el('div');
     for (const r of t2.injured) {
@@ -3464,7 +3473,7 @@ function renderCentral(doc) {
   }
 
   // --- the league table, from the save itself
-  if (doc.leagueTable?.rows?.length) {
+  if (settings.leagueTable && doc.leagueTable?.rows?.length) {
     const lt = doc.leagueTable;
     const v = (x) => ({ text: lt.started ? x : '—', num: true });
     const box = el('div');
@@ -3510,7 +3519,7 @@ function renderCentral(doc) {
   }
 
   // --- the world's news feed, from persistent_events
-  if (doc.calendar?.events?.length) {
+  if (settings.newsFeed && doc.calendar?.events?.length) {
     const box = el('div');
     for (const e of doc.calendar.events.slice(0, 8)) {
       const row = el('div', 'todo');
@@ -3694,13 +3703,24 @@ function renderShortlist(doc) {
     el('p', 'muted tiny', 'Then = the day you shortlisted. Now = this save. Drift is the story: a rising OVR means the price is rising with it.'),
   );
   const liveById = new Map((doc.transfers?.targets ?? []).map((t2) => [t2.playerId, t2]));
+  // Still worth it? A verdict that moves with every save, from the live read.
+  const verdictOf = (e, live) => {
+    if (!live) return { text: 'no live read', tip: 'Outside the current target scan this snapshot — the frozen numbers hold until a scan sees him again.' };
+    const head = (live.potential ?? 0) - (live.overall ?? 0);
+    const d = live.overall !== null && e.overall !== null ? live.overall - e.overall : 0;
+    if (head <= 1) return { text: 'ceiling reached', tip: `${live.overall}/${live.potential} — the growth you starred him for is spent. Only sign for what he is today.` };
+    if (d >= 2) return { text: 'move now', tip: `+${d} since you starred him — every save makes him dearer, and the ceiling is still ${head} away.` };
+    if (d < 0) return { text: 'cooling', tip: `${d} since you starred him — watch one more window before paying.` };
+    return { text: 'still worth it', tip: `${head} of growth still ahead at the profile you starred.` };
+  };
   panel.appendChild(
     table(
-      ['', 'Player', 'Club', { label: 'Pos', pos: true }, { label: 'OVR then', num: true }, { label: 'OVR now', num: true }, { label: 'Δ', num: true }, { label: 'POT', num: true }, 'Fee then', 'Fee now', 'Added'],
+      ['', 'Player', 'Club', { label: 'Pos', pos: true }, { label: 'OVR then', num: true }, { label: 'OVR now', num: true }, { label: 'Δ', num: true }, { label: 'POT', num: true }, 'Fee then', 'Fee now', 'Verdict', 'Added'],
       shortlist.map((e) => {
         const live = liveById.get(e.playerId);
         const nowOvr = live?.overall ?? null;
         const d = nowOvr !== null && e.overall !== null ? nowOvr - e.overall : null;
+        const verdict = verdictOf(e, live);
         return [
           { text: '', star: { on: true, onToggle: () => toggleShortlist(e, doc.gameDate) } },
           e.name,
@@ -3712,6 +3732,7 @@ function renderShortlist(doc) {
           { text: live?.potential ?? e.potential ?? '—', num: true, tier: live?.potential ?? e.potential },
           e.fee !== null ? moneyShort(e.fee) : '—',
           live?.feeGuide?.mid ? moneyShort(live.feeGuide.mid) : '—',
+          { text: verdict.text, title: verdict.tip },
           e.added ? `~${fmtDate(e.added)}` : '—',
         ];
       }),
