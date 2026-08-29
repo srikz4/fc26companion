@@ -60,8 +60,6 @@ Companion stands on work by the FC/FIFA community and open-source authors:
   [TypeScript](https://github.com/microsoft/TypeScript) (Apache-2.0). Each ships its own
   license with the package.
 
-If you believe your work should be credited here and is not, open an issue and it will be.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
