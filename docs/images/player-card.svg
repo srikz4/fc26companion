@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" width="900" height="430" font-family="-apple-system, 'Segoe UI', Roboto, sans-serif">
+  <rect width="900" height="430" rx="10" fill="#0b0f14"/>
+
+  <!-- mode chips -->
+  <g>
+    <rect x="16" y="14" width="58" height="24" rx="12" fill="none" stroke="#2a3441"/>
+    <text x="45" y="30" fill="#8b98a5" font-size="11" text-anchor="middle">Basic</text>
+    <rect x="80" y="14" width="54" height="24" rx="12" fill="none" stroke="#2a3441"/>
+    <text x="107" y="30" fill="#8b98a5" font-size="11" text-anchor="middle">Stats</text>
+    <rect x="140" y="14" width="86" height="24" rx="12" fill="#c9f24b"/>
+    <text x="183" y="30" fill="#101602" font-size="11" font-weight="700" text-anchor="middle">Attributes</text>
+    <rect x="232" y="14" width="78" height="24" rx="12" fill="none" stroke="#2a3441"/>
+    <text x="271" y="30" fill="#8b98a5" font-size="11" text-anchor="middle">Financial</text>
+  </g>
+
+  <!-- the row that was opened -->
+  <rect x="16" y="50" width="868" height="30" rx="4" fill="#c9f24b" fill-opacity="0.08"/>
+  <circle cx="34" cy="65" r="4" fill="#c9f24b"/>
+  <rect x="50" y="57" width="34" height="16" rx="4" fill="#1e2732"/>
+  <text x="67" y="69" fill="#8b98a5" font-size="9" font-weight="700" text-anchor="middle">LB</text>
+  <circle cx="102" cy="65" r="9" fill="#1e2732"/>
+  <text x="118" y="69" fill="#e8eef2" font-size="12" font-weight="700">P. Dorgu</text>
+  <text x="420" y="69" fill="#38bdf8" font-size="12" font-weight="800">81</text>
+  <text x="470" y="69" fill="#38bdf8" font-size="12" font-weight="800">81</text>
+  <text x="520" y="69" fill="#8b98a5" font-size="11">22</text>
+
+  <!-- the card, opened under the row -->
+  <rect x="16" y="86" width="868" height="330" rx="8" fill="#121821" stroke="#1e2732"/>
+  <circle cx="46" cy="116" r="15" fill="#1e2732"/>
+  <text x="70" y="114" fill="#5c6773" font-size="10">#13</text>
+  <text x="100" y="121" fill="#e8eef2" font-size="17" font-weight="800" letter-spacing="0.4">P. DORGU</text>
+  <rect x="196" y="106" width="30" height="18" rx="4" fill="#1e2732"/>
+  <text x="211" y="119" fill="#8b98a5" font-size="9.5" font-weight="700" text-anchor="middle">LB</text>
+  <g>
+    <text x="640" y="112" fill="#5c6773" font-size="8" font-weight="800" letter-spacing="0.8">OVR</text>
+    <rect x="636" y="106" width="34" height="20" rx="4" fill="#38bdf8" fill-opacity="0.15"/>
+    <text x="653" y="121" fill="#38bdf8" font-size="13" font-weight="800" text-anchor="middle">81</text>
+    <text x="700" y="112" fill="#5c6773" font-size="8" font-weight="800" letter-spacing="0.8">POT</text>
+    <rect x="696" y="106" width="34" height="20" rx="4" fill="#38bdf8" fill-opacity="0.15"/>
+    <text x="713" y="121" fill="#38bdf8" font-size="13" font-weight="800" text-anchor="middle">81</text>
+  </g>
+  <rect x="800" y="104" width="68" height="22" rx="11" fill="none" stroke="#2a3441"/>
+  <text x="834" y="119" fill="#8b98a5" font-size="10" text-anchor="middle">Close ✕</text>
+  <text x="34" y="150" fill="#8b98a5" font-size="10.5">🇩🇰 Denmark · 22y · LB / LM / RM / LW · Left foot · 185cm · Form Okay · Very happy</text>
+
+  <!-- attribute groups -->
+  <g>
+    <g transform="translate(34,168)">
+      <rect width="266" height="104" rx="6" fill="#0e1117" stroke="#1e2732"/>
+      <text x="12" y="20" fill="#5c6773" font-size="9" font-weight="800" letter-spacing="1">PACE</text>
+      <text x="242" y="22" fill="#4ade80" font-size="15" font-weight="800" text-anchor="end">88</text>
+      <line x1="12" y1="30" x2="254" y2="30" stroke="#1e2732"/>
+      <g font-size="10.5" fill="#8b98a5">
+        <text x="12" y="50">Acceleration</text>
+        <rect x="110" y="44" width="96" height="6" rx="3" fill="#1e2732"/><rect x="110" y="44" width="86" height="6" rx="3" fill="#4ade80"/>
+        <text x="248" y="50" fill="#4ade80" font-size="11" font-weight="750" text-anchor="end">89</text>
+        <text x="12" y="72">Sprint speed</text>
+        <rect x="110" y="66" width="96" height="6" rx="3" fill="#1e2732"/><rect x="110" y="66" width="84" height="6" rx="3" fill="#4ade80"/>
+        <text x="248" y="72" fill="#4ade80" font-size="11" font-weight="750" text-anchor="end">87</text>
+      </g>
+    </g>
+    <g transform="translate(316,168)">
+      <rect width="266" height="104" rx="6" fill="#0e1117" stroke="#1e2732"/>
+      <text x="12" y="20" fill="#5c6773" font-size="9" font-weight="800" letter-spacing="1">DEFENDING</text>
+      <text x="228" y="22" fill="#38bdf8" font-size="15" font-weight="800" text-anchor="end">80.2</text>
+      <text x="248" y="22" fill="#4ade80" font-size="10" font-weight="700" text-anchor="end">+0.4</text>
+      <line x1="12" y1="30" x2="254" y2="30" stroke="#1e2732"/>
+      <g font-size="10.5" fill="#8b98a5">
+        <text x="12" y="50">Interceptions</text>
+        <rect x="110" y="44" width="96" height="6" rx="3" fill="#1e2732"/><rect x="110" y="44" width="79" height="6" rx="3" fill="#38bdf8"/>
+        <text x="248" y="50" fill="#38bdf8" font-size="11" font-weight="750" text-anchor="end">82</text>
+        <text x="12" y="72">Standing tackle</text>
+        <rect x="110" y="66" width="96" height="6" rx="3" fill="#1e2732"/><rect x="110" y="66" width="76" height="6" rx="3" fill="#8b98a5"/>
+        <text x="248" y="72" fill="#8b98a5" font-size="11" font-weight="750" text-anchor="end">79</text>
+      </g>
+    </g>
+    <g transform="translate(598,168)">
+      <rect width="266" height="104" rx="6" fill="#0e1117" stroke="#1e2732"/>
+      <text x="12" y="20" fill="#5c6773" font-size="9" font-weight="800" letter-spacing="1">PHYSICAL</text>
+      <text x="228" y="22" fill="#8b98a5" font-size="15" font-weight="800" text-anchor="end">78</text>
+      <text x="252" y="22" fill="#4ade80" font-size="10" font-weight="700" text-anchor="end">+0.3</text>
+      <line x1="12" y1="30" x2="254" y2="30" stroke="#1e2732"/>
+      <g font-size="10.5" fill="#8b98a5">
+        <text x="12" y="50">Jumping</text>
+        <rect x="110" y="44" width="96" height="6" rx="3" fill="#1e2732"/><rect x="110" y="44" width="79" height="6" rx="3" fill="#38bdf8"/>
+        <text x="248" y="50" fill="#38bdf8" font-size="11" font-weight="750" text-anchor="end">82</text>
+        <text x="12" y="72">Strength</text>
+        <rect x="110" y="66" width="96" height="6" rx="3" fill="#1e2732"/><rect x="110" y="66" width="78" height="6" rx="3" fill="#38bdf8"/>
+        <text x="248" y="72" fill="#38bdf8" font-size="11" font-weight="750" text-anchor="end">81</text>
+      </g>
+    </g>
+  </g>
+
+  <text x="34" y="300" fill="#5c6773" font-size="9" font-weight="800" letter-spacing="1.2">ELITE FOR HIS POSITION, AND WHERE GROWTH PAYS</text>
+  <g>
+    <rect x="34" y="310" width="122" height="21" rx="10.5" fill="#4ade80" fill-opacity="0.14"/>
+    <text x="95" y="325" fill="#4ade80" font-size="11" font-weight="650" text-anchor="middle">Acceleration 89</text>
+    <rect x="164" y="310" width="118" height="21" rx="10.5" fill="#4ade80" fill-opacity="0.14"/>
+    <text x="223" y="325" fill="#4ade80" font-size="11" font-weight="650" text-anchor="middle">Interceptions 82</text>
+    <rect x="290" y="310" width="126" height="21" rx="10.5" fill="none" stroke="#c9f24b" stroke-opacity="0.55" stroke-dasharray="3 2"/>
+    <text x="353" y="325" fill="#c9f24b" font-size="11" text-anchor="middle">↑ Crossing 76</text>
+  </g>
+
+  <line x1="34" y1="350" x2="866" y2="350" stroke="#1e2732"/>
+  <text x="34" y="374" fill="#5c6773" font-size="10">Every attribute, exactly as the game shows it — keepers included. The card is dressed for</text>
+  <text x="34" y="392" fill="#5c6773" font-size="10">the view that opened it: the full sheet here, the match log under Stats, the money under Financial.</text>
+</svg>

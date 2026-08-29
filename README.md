@@ -39,6 +39,8 @@ page; phone addresses are printed in the server window. Save in game and the pag
 > Companion can only see what the game has written. **If a screen looks out of date, save in game**
 > — or advance a day — and it catches up within a few seconds.
 
+- **New here? Start with the [feature guide](docs/feature-guide.md)** — what Companion actually
+  does, with pictures.
 - New machine? See **[docs/install.md](docs/install.md)**.
 - What each screen means and how to play with it: **[docs/usage.md](docs/usage.md)**.
 
@@ -87,6 +89,8 @@ Companion stands on work by the FC/FIFA community and open-source authors:
   in `src/engine/eaValue.ts` were calibrated against their public FC 26 value calculator
   (a one-time sampling; nothing is fetched at runtime). Values shown are approximations and
   are marked as derived.
+- **[Lucide](https://lucide.dev)** (ISC) — the icon set. The handful of paths the app uses are
+  copied into `web/icons.js` rather than fetched, because the runtime never talks to the network.
 - **Dependencies** — [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (MIT),
   [fast-xml-parser](https://github.com/NaturalIntelligence/fast-xml-parser) (MIT),
   [tsx](https://github.com/privatenumber/tsx) (MIT), and

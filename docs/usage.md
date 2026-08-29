@@ -10,7 +10,8 @@ every screen refreshes itself the moment you do.
 
 
 The navigation mirrors the game's own menu: **Central · Squad · Transfers · Academy · Office ·
-Story · Customise**, each with its own sub-tabs.
+Story · Customise**, each with its own sub-tabs. For the tour rather than the manual, see the
+**[feature guide](feature-guide.md)**.
 
 ## The controls
 
@@ -113,9 +114,11 @@ edge, and — with RPG mode on — the campaign.
 Grouped switches for Display, Central panels, Guidance and Preferences (landing tab, compact
 density, full money figures, player faces), plus a box each for the two modes.
 
-**RPG mode** turns the career into a campaign: pick one of nine, and its missions appear in the
+**RPG mode** turns the career into a campaign: pick one of nine — or blend several under Custom,
+where their ladders interleave so the arc advances on every front at once. Missions appear in the
 campaign's violet at the top of whichever view the work belongs to — title pace on Team Management,
-minutes on Development, contracts on Wages. **AI mode** is switched off and unavailable: nothing is
+minutes on Development, contracts on Wages — and each campaign names the phases of a season in its
+own voice. **AI mode** is switched off and unavailable: nothing is
 wired behind it yet, and the app does not pretend otherwise.
 
 ## The alert rail

@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 470" width="900" height="470" font-family="-apple-system, 'Segoe UI', Roboto, sans-serif">
+  <rect width="900" height="470" rx="10" fill="#0b0f14"/>
+  <rect x="0" y="0" width="900" height="42" fill="#0e1117"/>
+  <text x="20" y="27" fill="#c9f24b" font-size="14" font-weight="800" letter-spacing="1.2">COMPANION</text>
+  <rect x="128" y="10" width="72" height="23" rx="5" fill="#c9f24b"/>
+  <text x="164" y="26" fill="#101602" font-size="11" font-weight="800" text-anchor="middle" letter-spacing="0.8">CENTRAL</text>
+  <g fill="#8b98a5" font-size="11" font-weight="700" letter-spacing="0.8">
+    <text x="216" y="26">SQUAD</text><text x="272" y="26">TRANSFERS</text><text x="352" y="26">ACADEMY</text>
+    <text x="424" y="26">OFFICE</text><text x="478" y="26">STORY</text><text x="528" y="26">CUSTOMISE</text>
+  </g>
+  <circle cx="742" cy="21" r="4" fill="#4ade80"/>
+  <text x="754" y="25" fill="#5c6773" font-size="10.5">synced 6s ago</text>
+  <line x1="0" y1="42" x2="900" y2="42" stroke="#c9f24b" stroke-opacity="0.35"/>
+
+  <!-- season panel -->
+  <rect x="16" y="58" width="558" height="146" rx="8" fill="#121821" stroke="#1e2732"/>
+  <text x="32" y="80" fill="#8b98a5" font-size="10" font-weight="800" letter-spacing="1.5">SEASON 3</text>
+  <text x="32" y="112" fill="#e8eef2" font-size="23" font-weight="800" letter-spacing="0.5">SATURDAY, 07 AUG</text>
+  <text x="252" y="112" fill="#5c6773" font-size="14" font-weight="700">2027</text>
+  <rect x="300" y="96" width="196" height="21" rx="10" fill="#c9f24b" fill-opacity="0.1" stroke="#c9f24b" stroke-opacity="0.5"/>
+  <circle cx="313" cy="107" r="3.2" fill="#c9f24b"/>
+  <text x="323" y="111" fill="#c9f24b" font-size="9.5" font-weight="700">Summer window 07-01 → 08-31 OPEN</text>
+  <g>
+    <g font-size="9" fill="#5c6773" font-weight="700" letter-spacing="0.7">
+      <text x="44" y="140">WON</text><text x="112" y="140">DRAWN</text><text x="188" y="140">LOST</text>
+      <text x="256" y="140">SCORED</text><text x="336" y="140">CONCEDED</text><text x="428" y="140">POINTS</text><text x="496" y="140">PACE</text>
+    </g>
+    <g font-size="21" font-weight="800">
+      <text x="44" y="166" fill="#4ade80">3</text><text x="112" y="166" fill="#8b98a5">3</text><text x="188" y="166" fill="#f87171">1</text>
+      <text x="256" y="166" fill="#4ade80">19</text><text x="336" y="166" fill="#f87171">8</text><text x="428" y="166" fill="#e8eef2">15</text><text x="496" y="166" fill="#c9f24b">76</text>
+    </g>
+  </g>
+  <rect x="32" y="178" width="512" height="14" rx="3" fill="#0b0f14"/>
+  <rect x="32" y="178" width="3" height="14" fill="#a78bfa"/>
+  <text x="44" y="189" fill="#8b98a5" font-size="10.5">Chapter 3 · a title charge at full tilt — the academy is watching</text>
+
+  <!-- division by form -->
+  <rect x="16" y="216" width="558" height="238" rx="8" fill="#121821" stroke="#1e2732"/>
+  <text x="32" y="238" fill="#8b98a5" font-size="10.5" font-weight="800" letter-spacing="1.6">ENGLAND PREMIER LEAGUE — BY FORM</text>
+  <g font-size="9" fill="#5c6773" font-weight="700" letter-spacing="0.7">
+    <text x="52" y="260">CLUB</text><text x="360" y="260">FORM</text><text x="500" y="260">LAST</text>
+  </g>
+  <g font-size="11.5" fill="#e8eef2">
+    <g>
+      <rect x="28" y="268" width="534" height="26" rx="4" fill="#c9f24b" fill-opacity="0.08"/>
+      <circle cx="40" cy="281" r="3.5" fill="none" stroke="#c9f24b" stroke-width="1.4"/>
+      <text x="52" y="285" font-weight="700">Manchester United</text>
+      <rect x="360" y="278" width="86" height="5" rx="2.5" fill="#1e2732"/><rect x="360" y="278" width="74" height="5" rx="2.5" fill="#4ade80"/>
+      <text x="456" y="285" font-size="11" font-weight="750">86</text>
+      <text x="500" y="285" fill="#4ade80" font-size="10.5" font-weight="800">W</text>
+    </g>
+    <g transform="translate(0,30)">
+      <circle cx="40" cy="281" r="3.5" fill="none" stroke="#2a3441" stroke-width="1.4"/>
+      <text x="52" y="285">Arsenal</text>
+      <rect x="360" y="278" width="86" height="5" rx="2.5" fill="#1e2732"/><rect x="360" y="278" width="86" height="5" rx="2.5" fill="#4ade80"/>
+      <text x="456" y="285" font-size="11" font-weight="750">100</text>
+      <text x="500" y="285" fill="#f87171" font-size="10.5" font-weight="800">L</text>
+    </g>
+    <g transform="translate(0,60)">
+      <circle cx="40" cy="281" r="3.5" fill="none" stroke="#2a3441" stroke-width="1.4"/>
+      <text x="52" y="285">Brentford</text>
+      <rect x="360" y="278" width="86" height="5" rx="2.5" fill="#1e2732"/><rect x="360" y="278" width="66" height="5" rx="2.5" fill="#4ade80"/>
+      <text x="456" y="285" font-size="11" font-weight="750">78</text>
+      <text x="500" y="285" fill="#4ade80" font-size="10.5" font-weight="800">W</text>
+    </g>
+    <g transform="translate(0,90)">
+      <circle cx="40" cy="281" r="3.5" fill="none" stroke="#2a3441" stroke-width="1.4"/>
+      <text x="52" y="285">Manchester City</text>
+      <rect x="360" y="278" width="86" height="5" rx="2.5" fill="#1e2732"/><rect x="360" y="278" width="46" height="5" rx="2.5" fill="#38bdf8"/>
+      <text x="456" y="285" font-size="11" font-weight="750">53</text>
+      <text x="500" y="285" fill="#4ade80" font-size="10.5" font-weight="800">W</text>
+    </g>
+    <g transform="translate(0,120)">
+      <circle cx="40" cy="281" r="3.5" fill="none" stroke="#2a3441" stroke-width="1.4"/>
+      <text x="52" y="285">Liverpool</text>
+      <rect x="360" y="278" width="86" height="5" rx="2.5" fill="#1e2732"/><rect x="360" y="278" width="28" height="5" rx="2.5" fill="#f87171"/>
+      <text x="456" y="285" font-size="11" font-weight="750">33</text>
+      <text x="500" y="285" fill="#8b98a5" font-size="10.5" font-weight="800">D</text>
+    </g>
+  </g>
+
+  <!-- side column -->
+  <rect x="590" y="58" width="294" height="132" rx="8" fill="#121821" stroke="#1e2732"/>
+  <text x="606" y="80" fill="#8b98a5" font-size="10.5" font-weight="800" letter-spacing="1.5">DECISIONS — 25</text>
+  <g font-size="10">
+    <text x="606" y="104" fill="#c9f24b" font-weight="800" font-size="9">SIGN TO SENIOR</text>
+    <text x="700" y="104" fill="#e8eef2" font-weight="700">Jesse Ford</text>
+    <text x="606" y="120" fill="#5c6773">Academy deal has 10m left on a 91 ceiling.</text>
+    <text x="606" y="144" fill="#facc15" font-weight="800" font-size="9">RENEWAL DUE</text>
+    <text x="700" y="144" fill="#e8eef2" font-weight="700">P. Dorgu</text>
+    <text x="606" y="160" fill="#5c6773">Still growing — pay tomorrow's wage today.</text>
+    <text x="606" y="180" fill="#5c6773" font-size="9">+23 more in the rail</text>
+  </g>
+
+  <rect x="590" y="202" width="294" height="110" rx="8" fill="#121821" stroke="#1e2732"/>
+  <text x="606" y="224" fill="#8b98a5" font-size="10.5" font-weight="800" letter-spacing="1.5">TREATMENT ROOM</text>
+  <g font-size="10">
+    <text x="606" y="248" fill="#f87171" font-weight="800" font-size="9">INJURED</text>
+    <text x="672" y="248" fill="#e8eef2" font-weight="700">L. Martínez · CB</text>
+    <text x="606" y="264" fill="#5c6773">out ~28 days — step in: M. de Ligt (fit 86)</text>
+    <text x="606" y="288" fill="#5c6773" font-size="9.5">Nobody suspended.</text>
+  </g>
+
+  <rect x="590" y="324" width="294" height="130" rx="8" fill="#121821" stroke="#a78bfa" stroke-opacity="0.4"/>
+  <text x="606" y="346" fill="#a78bfa" font-size="10.5" font-weight="800" letter-spacing="1.5">CAMPAIGN</text>
+  <text x="606" y="366" fill="#8b98a5" font-size="10">The Treble — 6 of 12 milestones</text>
+  <rect x="606" y="376" width="262" height="7" rx="3.5" fill="#1e2732"/>
+  <rect x="606" y="376" width="131" height="7" rx="3.5" fill="#a78bfa"/>
+  <text x="606" y="404" fill="#e8eef2" font-size="10.5" font-weight="700">▶ Win the Champions League</text>
+  <text x="606" y="422" fill="#5c6773" font-size="9.5">you are here</text>
+  <text x="606" y="442" fill="#a78bfa" font-size="10" font-style="italic">"Three trophies or the season was a rehearsal."</text>
+</svg>
