@@ -3368,9 +3368,28 @@ function renderSellValues(doc) {
     el(
       'p',
       'muted',
-      'EA-style valuation for every senior player — the game\u2019s own idea of fair, rebuilt from community-derived curves. ' +
-        'Floor: walk away below it. Ceiling: where a motivated buyer can be pushed. Marked ~ because it is derived, not read; ' +
-        'when an in-game screen disagrees, tell Companion and the curves get recalibrated.',
+      'EA-style valuation for every senior player \u2014 the game\u2019s own idea of fair, rebuilt from ' +
+        'community-derived curves \u2014 alongside what clubs in this world have actually paid. ' +
+        'Marked ~ because both are derived, not read.',
+    ),
+  );
+  /*
+   * Selling is not buying in reverse, and these numbers lean the wrong way for
+   * it. Both bands are built from fees that were PAID, which is a buyer's view.
+   * Driving a sale is the other side of that table: buyers compete, the game's
+   * own delegate quotes optimistically, and the price clears higher. One
+   * observation is not a calibration, so nothing is scaled by it — it is stated
+   * instead, because knowing which way a number leans is most of what you need
+   * from it.
+   */
+  panel.appendChild(
+    el(
+      'p',
+      'muted tiny',
+      'Both bands come from fees that were paid, which is the buying side of the table. A sale you drive ' +
+        'usually clears higher: on the one sale measured against real figures, the top of the band was 40M, ' +
+        'the game\u2019s delegate quoted 60M, and it went for 47.5M. Treat the ceiling as where to open, not ' +
+        'where to stop \u2014 and tell Companion what you actually get, so this rests on more than one deal.',
     ),
   );
   if (state.sellSel && !sv.rows.some((r) => r.playerId === state.sellSel)) state.sellSel = null;
