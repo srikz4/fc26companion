@@ -27,13 +27,13 @@ const storedPref = (key, allowed, fallback) => {
  * RPG and AI modes default off — they add, never take away.
  */
 const SETTING_DEFS = [
-  { key: 'rail', label: 'Alert rail', note: 'The "Needs attention" strip of rule-driven actions.', on: true },
-  { key: 'actionChips', label: 'Action chips on rosters', note: 'LOAN OUT / SIGN TO SENIOR chips on squad and youth rows.', on: true },
-  { key: 'trendArrows', label: 'Trend arrows', note: 'Season-form arrows next to each rating change: ▲ surge, ↗ rise, — flat, ↘ dip, ▼ fall.', on: true },
-  { key: 'developFocus', label: 'Development focus', note: 'On the player card: the attributes where growth buys the most, from the fit weights and this world\u2019s percentiles. Point the game\u2019s development plans at them.', on: true },
-  { key: 'absurd', label: 'The absurd bit', note: 'The cheeky lines on the Story card.', on: true },
-  { key: 'rpg', label: 'RPG mode', note: 'Career-as-campaign: live challenges computed from your save, with progress. Deterministic — every number is real.', on: false },
-  { key: 'ai', label: 'AI mode', note: 'AI narration and insights on top of the recorded facts. Needs a local model or an API key; until one is configured this shows its setup status.', on: false },
+  { key: 'rail', group: 'Display', label: 'Alert rail', note: 'The "Needs attention" strip of rule-driven actions.', on: true },
+  { key: 'actionChips', group: 'Display', label: 'Action chips on rosters', note: 'LOAN OUT / SIGN TO SENIOR chips on squad and academy rows.', on: true },
+  { key: 'trendArrows', group: 'Display', label: 'Trend arrows', note: 'Season-form arrows next to each rating change: ▲ surge, ↗ rise, — flat, ↘ dip, ▼ fall.', on: true },
+  { key: 'developFocus', group: 'Guidance', label: 'Development focus', note: 'On the player card: the attributes where growth buys the most, from the fit weights and this world\u2019s percentiles. Point the game\u2019s development plans at them.', on: true },
+  { key: 'absurd', group: 'Guidance', label: 'The absurd bit', note: 'The cheeky lines on the Story card.', on: true },
+  { key: 'rpg', group: 'Modes', label: 'RPG mode', note: 'Career-as-campaign: live challenges computed from your save, with progress. Deterministic — every number is real.', on: false },
+  { key: 'ai', group: 'Modes', label: 'AI mode', note: 'AI narration and insights on top of the recorded facts. Needs a local model or an API key; until one is configured this shows its setup status.', on: false },
 ];
 const settings = (() => {
   try {
@@ -92,6 +92,15 @@ const state = {
   oppLeague: null,
   oppNation: null,
   devFilter: 'grow',
+  subs: (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('subs') || '{}');
+      return raw && typeof raw === 'object' ? raw : {};
+    } catch {
+      return {};
+    }
+  })(),
+  hubMode: 'basic',
   open: new Set(),
   attrs: new Set(),
   lastSync: null,
@@ -864,7 +873,7 @@ function table(headers, rows, opts = {}) {
       const text = isObj ? cell.text : (cell ?? '—');
       if (isObj && cell.star) {
         const b = el('button', `starbtn${cell.star.on ? ' on' : ''}`, cell.star.on ? '★' : '☆');
-        b.dataset.tip = cell.star.on ? 'On your shortlist — tap to drop' : 'Shortlist this player';
+        b.dataset.tip = cell.star.on ? 'On your watchlist — tap to drop' : 'Watch this player: freezes today’s numbers so the drift shows';
         activatable(b, cell.star.onToggle);
         td.appendChild(b);
       } else if (isObj && cell.cls === 'posbadge') td.appendChild(el('span', 'pos-pill', text));
@@ -1999,7 +2008,7 @@ function renderLoans(doc) {
   return frag;
 }
 
-function renderYouth(doc) {
+function renderScouting(doc) {
   const frag = document.createDocumentFragment();
 
   if (doc.scouts.length) {
@@ -2037,9 +2046,21 @@ function renderYouth(doc) {
       })(),
     );
     frag.appendChild(panel);
+  } else {
+    const p2 = el('div', 'panel');
+    p2.appendChild(el('h2', null, '🔭 Scouts'));
+    p2.appendChild(el('p', 'muted tiny', 'No scouts hired yet — hire them in game and their missions land here.'));
+    frag.appendChild(p2);
   }
 
-  frag.appendChild(renderPlayers(doc.academy));
+  {
+    const notes = el('div', 'panel');
+    notes.appendChild(el('h2', null, '📬 Reports'));
+    notes.appendChild(
+      el('p', 'muted tiny', 'The report screen itself is never written to disk — a prospect exists in the save only once you sign him to the academy, and from that moment he is under My Academy with tier, potential range and months-in-squad. What is readable before that is above: who is out, where, hunting which positions, and when they return.'),
+    );
+    frag.appendChild(notes);
+  }
   return frag;
 }
 
@@ -2059,46 +2080,6 @@ function barRow(label, value, max, tierValue, suffix = '') {
 function renderStats(doc) {
   const s2 = doc.stats;
   const frag = document.createDocumentFragment();
-
-  // Season story first: the manager's actual record, straight from the save.
-  if (doc.seasons.length) {
-    const panel = el('div', 'panel');
-    panel.appendChild(el('h2', null, '📜 Season record'));
-    for (const season of doc.seasons) {
-      const row = el('div', 'season');
-      row.appendChild(el('b', null, `Season ${season.season}`));
-
-      const wdl = el('div', 'wdl');
-      const total = Math.max(1, season.played);
-      for (const [n, cls] of [[season.wins, 'w'], [season.draws, 'd'], [season.losses, 'l']]) {
-        const seg = el('i', `seg ${cls}`);
-        seg.style.width = `${(n / total) * 100}%`;
-        seg.title = `${season.wins}W ${season.draws}D ${season.losses}L`;
-        wdl.appendChild(seg);
-      }
-      row.appendChild(wdl);
-
-      const facts = el('span', 'sfacts');
-      const current = season.season === doc.season && season.played > 0 && season.played < 38;
-      const bits = [
-        `${season.wins}W ${season.draws}D ${season.losses}L`,
-        season.points !== null ? `${season.points} pts` : null,
-        current && season.points !== null
-          ? `pace ${Math.round((season.points / season.played) * 38)} over 38`
-          : null,
-        season.position !== null ? `P${season.position}` : null,
-        season.goalsFor !== null ? `${season.goalsFor}:${season.goalsAgainst}` : null,
-        season.leagueTrophies ? `🏆×${season.leagueTrophies}` : null,
-        season.cupTrophies ? `🏅×${season.cupTrophies}` : null,
-        season.bigBuy ? `in: ${season.bigBuy.name} ${moneyShort(season.bigBuy.amount)}` : null,
-        season.bigSell ? `out: ${season.bigSell.name} ${moneyShort(season.bigSell.amount)}` : null,
-      ].filter(Boolean);
-      facts.textContent = bits.join(' · ');
-      row.appendChild(facts);
-      panel.appendChild(row);
-    }
-    frag.appendChild(panel);
-  }
 
   const grid = el('div', 'grid');
   const panel = (title, node) => {
@@ -2187,14 +2168,269 @@ function renderStats(doc) {
     grid.appendChild(cw);
   }
 
+
+  // The to-do list: label, names, numbers. No sermons.
+  {
+    const items = [];
+    const starving = [...doc.senior, ...doc.academy]
+      .filter((p) => (p.age ?? 99) <= 21 && (p.headroom ?? 0) >= 5 && (p.minutesThisSeason ?? 0) < 300)
+      .sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0))
+      .slice(0, 3);
+    if (starving.length) items.push(['Needs minutes', starving.map((p) => p.name).join(' · '), `5+ growth, under 300'`]);
+    const falling = s2.ceilingWatch.filter((r) => r.delta < 0);
+    if (falling.length) items.push(['Ceiling slipping', falling.map((r) => `${r.name} ${r.delta}`).join(' · '), 'give them games']);
+    const promotable = doc.academy
+      .filter((p) => (p.potential ?? 0) >= 85 && (p.age ?? 0) >= 17)
+      .sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0))
+      .slice(0, 2);
+    if (promotable.length) items.push(['Promote', promotable.map((p) => `${p.name} (${p.potential})`).join(' · '), 'academy → senior']);
+    const dueNow = (doc.wages?.renewals ?? []).filter((r) => r.urgency === 'now').length;
+    if (dueNow) items.push(['Renewals due', `${dueNow} now`, 'Wages tab']);
+    if (items.length) {
+      const tp = el('div', 'panel');
+      tp.appendChild(el('h2', null, '🎯 To do'));
+      for (const [label, who, why] of items) {
+        const line = el('div', 'todo');
+        line.appendChild(el('b', null, label));
+        line.appendChild(el('span', 'who', who));
+        line.appendChild(el('span', 'why', why));
+        tp.appendChild(line);
+      }
+      grid.appendChild(tp);
+    }
+  }
+  const summary = el('div', 'panel');
+  summary.appendChild(el('h2', null, '🧮 At a glance'));
+  summary.appendChild(
+    table(
+      ['Measure', { label: 'Value', num: true }],
+      [
+        ['Senior players', { text: s2.squadSize, num: true }],
+        ['Academy prospects', { text: s2.academySize, num: true }],
+        ['Mean overall', { text: s2.meanOverall ?? '—', num: true, tier: s2.meanOverall }],
+        ['Mean ceiling', { text: s2.meanPotential ?? '—', num: true, tier: s2.meanPotential }],
+        ['Mean age', { text: s2.meanAge ?? '—', num: true }],
+        ['Minutes played', { text: s2.totalMinutes.toLocaleString('en-GB'), num: true }],
+        ['Wage bill', { text: money(s2.wageBill), num: true }],
+      ],
+    ),
+  );
+
+  frag.appendChild(grid);
+  frag.appendChild(summary);
+  return frag;
+}
+
+/**
+ * Squad Hub, with the game's own four ways of reading a squad: Basic (the
+ * roster), Stats, Attributes, Financial. Same players, different columns.
+ */
+function renderSquadHub(doc) {
+  const frag = document.createDocumentFragment();
+  const chips = el('div', 'chiprow hubmodes');
+  for (const [id, label] of [['basic', 'Basic'], ['stats', 'Stats'], ['attributes', 'Attributes'], ['financial', 'Financial']]) {
+    const chip = el('button', `chip${(state.hubMode ?? 'basic') === id ? ' on' : ''}`, label);
+    activatable(chip, () => { state.hubMode = id; render(); }, { skipWhen: () => (state.hubMode ?? 'basic') === id });
+    chips.appendChild(chip);
+  }
+  frag.appendChild(chips);
+
+  const mode = state.hubMode ?? 'basic';
+  if (mode === 'basic') {
+    frag.appendChild(renderPlayers(doc.senior));
+    return frag;
+  }
+
+  const list = applyFilters(doc.senior);
+  const panel = el('div', 'panel');
+  if (mode === 'stats') {
+    panel.appendChild(el('h2', null, '📊 Season numbers'));
+    panel.appendChild(
+      table(
+        ['Player', { label: 'Pos', pos: true }, { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Apps', num: true }, { label: 'Goals', num: true }, { label: 'Rating', num: true }, { label: 'Minutes', num: true }, 'Form'],
+        list.map((p) => [
+          p.name,
+          { text: p.positionShort ?? '—', cls: 'posbadge' },
+          { text: p.age ?? '—', num: true },
+          { text: p.overall ?? '—', num: true, tier: p.overall },
+          { text: p.appearances ?? '—', num: true },
+          { text: p.goals ?? '—', num: true },
+          { text: p.averageRating ?? '—', num: true },
+          { text: p.minutesThisSeason ?? '—', num: true },
+          p.form ?? '—',
+        ]),
+      ),
+    );
+  } else if (mode === 'attributes') {
+    const sample = list.find((p) => p.positionShort !== 'GK') ?? list[0];
+    const groups = sample?.groups?.map((g) => g.name) ?? [];
+    panel.appendChild(el('h2', null, '🧬 Attribute groups'));
+    panel.appendChild(
+      table(
+        ['Player', { label: 'Pos', pos: true }, { label: 'OVR', num: true }, ...groups.map((g) => ({ label: g, num: true }))],
+        list.map((p) => [
+          p.name,
+          { text: p.positionShort ?? '—', cls: 'posbadge' },
+          { text: p.overall ?? '—', num: true, tier: p.overall },
+          ...groups.map((g) => {
+            const grp = p.groups.find((x) => x.name === g);
+            return { text: grp?.mean ?? '—', num: true, tier: grp?.mean };
+          }),
+        ]),
+      ),
+    );
+    panel.appendChild(el('p', 'muted tiny', 'Group means. A keeper\u2019s groups differ from an outfielder\u2019s, so his columns read — here; open his card for the full sheet.'));
+  } else {
+    const valueOf = new Map((doc.sellValues?.rows ?? []).map((r) => [r.playerId, r]));
+    panel.appendChild(el('h2', null, '💷 Money'));
+    panel.appendChild(
+      table(
+        ['Player', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Wage', num: true }, 'Contract', 'Wage check', { label: 'Value', num: true }],
+        list.map((p) => {
+          const v = valueOf.get(p.playerId);
+          return [
+            p.name,
+            { text: p.age ?? '—', num: true },
+            { text: p.overall ?? '—', num: true, tier: p.overall },
+            { text: money(p.wage) ?? '—', num: true },
+            p.contractMonths !== null ? fmtTerm(p.contractMonths) : '—',
+            p.wageVerdict ?? '—',
+            {
+              text: v?.mid != null ? moneyShort(v.mid) : '—',
+              num: true,
+              title: v?.mid != null ? `This world's own deals price him ${moneyShort(v.low)}–${moneyShort(v.high)}` : 'No priced deals in this world to model from yet',
+            },
+          ];
+        }),
+      ),
+    );
+  }
+  frag.appendChild(panel);
+  return frag;
+}
+
+/**
+ * The shortlist as the game saved it: read from the save's own blob section,
+ * cracked by shortlisting known players and diffing the bytes.
+ */
+function renderIngameShortlist(doc) {
+  const frag = document.createDocumentFragment();
+  const sl = doc.shortlistIngame;
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, '⭐ Shortlist — from the game'));
+  if (!sl?.readable) {
+    panel.appendChild(
+      el('p', 'muted', 'The shortlist section of this save could not be read. It lives outside the database block, and when its layout shifts Companion says so rather than guessing.'),
+    );
+  } else if (!sl.players.length) {
+    panel.appendChild(
+      el('p', 'muted', 'Your in-game shortlist is empty. Shortlist players in game, save, and they appear here with the club, the numbers and what this world would pay.'),
+    );
+  } else {
+    panel.appendChild(
+      table(
+        ['Player', 'Club', 'League', 'From', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Fee guide', num: true }],
+        sl.players.map((p) => [
+          p.name,
+          p.club ?? '—',
+          p.league ?? '—',
+          `${flagFor(p.nation)}${p.nation ?? '—'}`,
+          { text: p.age ?? '—', num: true },
+          { text: p.overall ?? '—', num: true, tier: p.overall },
+          { text: p.potential ?? '—', num: true, tier: p.potential },
+          {
+            text: p.fee ? moneyShort(p.fee.mid) : '—',
+            num: true,
+            title: p.fee ? `Modelled from this world's own deals: ${moneyShort(p.fee.low)}–${moneyShort(p.fee.high)}` : 'No priced deals in this world to model from yet',
+          },
+        ]),
+      ),
+    );
+    panel.appendChild(
+      el('p', 'muted tiny', `Read straight from the save's own shortlist section${sl.date ? `, last touched ${fmtDate(sl.date)}` : ''}. Shortlist or drop players in game and save — this list follows. The Watchlist tab is Companion's own layer with drift tracking on top.`),
+    );
+  }
+  frag.appendChild(panel);
+  return frag;
+}
+
+/**
+ * Sell values. No custom sliders: the band is fitted on the transfers this
+ * world has actually agreed — the game's own market, read back at your squad.
+ */
+function renderSellValues(doc) {
+  const frag = document.createDocumentFragment();
+  const sv = doc.sellValues;
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, '💰 Sell values'));
+  if (!sv?.modelled) {
+    panel.appendChild(
+      el('p', 'muted', `No asking prices yet: the fee model fits itself to this world's own agreed transfers, and the save currently records ${sv?.sample ?? 0} priced deals. Play through a window — as the world does business, every player here gets a floor–expect–ask band.`),
+    );
+  } else {
+    panel.appendChild(
+      table(
+        ['Player', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Wage', num: true }, 'Contract', { label: 'Floor', num: true }, { label: 'Expect', num: true }, { label: 'Ask', num: true }],
+        sv.rows.map((r) => [
+          r.name,
+          { text: r.age ?? '—', num: true },
+          { text: r.overall ?? '—', num: true, tier: r.overall },
+          { text: r.potential ?? '—', num: true, tier: r.potential },
+          { text: money(r.wage) ?? '—', num: true },
+          r.contractMonths !== null ? fmtTerm(r.contractMonths) : '—',
+          { text: r.low !== null ? moneyShort(r.low) : r.offMarket ? 'beyond' : '—', num: true },
+          { text: r.mid !== null ? moneyShort(r.mid) : r.offMarket ? 'the market' : '—', num: true },
+          { text: r.high !== null ? moneyShort(r.high) : r.offMarket ? '↑' : '—', num: true },
+        ]),
+      ),
+    );
+    panel.appendChild(
+      el('p', 'muted tiny', `Fitted on the ${sv.sample} deals this world has actually agreed — its own market, applied to your squad. Floor: walk away below it. Ask: open here. "Beyond the market" means he is bigger than any deal this world has done, so no honest number exists.`),
+    );
+  }
+  frag.appendChild(panel);
+  return frag;
+}
+
+/** The target coach: the game's own star ratings, filtered to poachable. */
+function renderCoach(doc) {
+  const frag = document.createDocumentFragment();
+  const c = doc.coaching;
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, '🎓 Target coach'));
+  if (c?.targets?.length) {
+    panel.appendChild(
+      table(
+        ['Manager', 'Club', { label: 'Stars', num: true }, { label: 'Age', num: true }],
+        c.targets.map((m) => [
+          m.name,
+          m.club ?? '—',
+          { text: '★'.repeat(Math.round(m.stars ?? 0)), cls: `stars m${Math.min(5, Math.max(1, Math.round(m.stars ?? 1)))}`, title: `${m.stars} stars — the game's own rating` },
+          { text: m.age ?? '—', num: true },
+        ]),
+      ),
+    );
+    panel.appendChild(
+      el('p', 'muted tiny', 'The game star-rates every real manager; these are the best-rated ones employed at clubs in your leagues right now, youngest first among equals. The save has no coach-hiring mechanic to write back to — use them as Live Editor targets or succession notes. The full list, national coaches included, is under Office › Manager Market.'),
+    );
+  } else {
+    panel.appendChild(el('p', 'muted tiny', 'No rated club managers found in this world.'));
+  }
+  frag.appendChild(panel);
+  return frag;
+}
+
+/* ---------------- the Office ---------------- */
+
+/** Board expectations: confidence, objectives, competition outcomes. */
+function renderBoard(doc) {
+  const frag = document.createDocumentFragment();
   const board = el('div', 'panel');
   board.appendChild(el('h2', null, '🏛 Board'));
   board.appendChild(
     table(
       ['Measure', { label: 'Value', num: true }],
       [
-        ['Your wage', { text: money(doc.board.wage), num: true }],
-        ['Career earnings', { text: money(doc.board.totalEarnings), num: true }],
         ['Reputation', { text: doc.board.reputation ?? '—', num: true }],
         ['Season objectives set', { text: doc.board.objectivesSet, num: true }],
       ],
@@ -2249,58 +2485,179 @@ function renderStats(doc) {
     if (doc.board.bigLoss) rec.push(`worst loss ${doc.board.bigLoss.userScore}–${doc.board.bigLoss.oppScore} v ${doc.board.bigLoss.opponent}`);
     board.appendChild(el('p', 'tipline', rec.join(' · ') + '.'));
   }
+  frag.appendChild(board);
+  return frag;
+}
 
-  // The to-do list: label, names, numbers. No sermons.
-  {
-    const items = [];
-    const starving = [...doc.senior, ...doc.academy]
-      .filter((p) => (p.age ?? 99) <= 21 && (p.headroom ?? 0) >= 5 && (p.minutesThisSeason ?? 0) < 300)
-      .sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0))
-      .slice(0, 3);
-    if (starving.length) items.push(['Needs minutes', starving.map((p) => p.name).join(' · '), `5+ growth, under 300'`]);
-    const falling = s2.ceilingWatch.filter((r) => r.delta < 0);
-    if (falling.length) items.push(['Ceiling slipping', falling.map((r) => `${r.name} ${r.delta}`).join(' · '), 'give them games']);
-    const promotable = doc.academy
-      .filter((p) => (p.potential ?? 0) >= 85 && (p.age ?? 0) >= 17)
-      .sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0))
-      .slice(0, 2);
-    if (promotable.length) items.push(['Promote', promotable.map((p) => `${p.name} (${p.potential})`).join(' · '), 'academy → senior']);
-    const dueNow = (doc.wages?.renewals ?? []).filter((r) => r.urgency === 'now').length;
-    if (dueNow) items.push(['Renewals due', `${dueNow} now`, 'Wages tab']);
-    if (items.length) {
-      const tp = el('div', 'panel');
-      tp.appendChild(el('h2', null, '🎯 To do'));
-      for (const [label, who, why] of items) {
-        const line = el('div', 'todo');
-        line.appendChild(el('b', null, label));
-        line.appendChild(el('span', 'who', who));
-        line.appendChild(el('span', 'why', why));
-        tp.appendChild(line);
+/** The manager's own office: career record, pay, the record book. */
+function renderManagerOffice(doc) {
+  const frag = document.createDocumentFragment();
+
+  // Season story first: the manager's actual record, straight from the save.
+  if (doc.seasons.length) {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, '📜 Season record'));
+    for (const season of doc.seasons) {
+      const row = el('div', 'season');
+      row.appendChild(el('b', null, `Season ${season.season}`));
+
+      const wdl = el('div', 'wdl');
+      const total = Math.max(1, season.played);
+      for (const [n, cls] of [[season.wins, 'w'], [season.draws, 'd'], [season.losses, 'l']]) {
+        const seg = el('i', `seg ${cls}`);
+        seg.style.width = `${(n / total) * 100}%`;
+        seg.title = `${season.wins}W ${season.draws}D ${season.losses}L`;
+        wdl.appendChild(seg);
       }
-      grid.appendChild(tp);
-    }
-  }
-  grid.appendChild(board);
+      row.appendChild(wdl);
 
-  const summary = el('div', 'panel');
-  summary.appendChild(el('h2', null, '🧮 At a glance'));
-  summary.appendChild(
+      const facts = el('span', 'sfacts');
+      const current = season.season === doc.season && season.played > 0 && season.played < 38;
+      const bits = [
+        `${season.wins}W ${season.draws}D ${season.losses}L`,
+        season.points !== null ? `${season.points} pts` : null,
+        current && season.points !== null
+          ? `pace ${Math.round((season.points / season.played) * 38)} over 38`
+          : null,
+        season.position !== null ? `P${season.position}` : null,
+        season.goalsFor !== null ? `${season.goalsFor}:${season.goalsAgainst}` : null,
+        season.leagueTrophies ? `🏆×${season.leagueTrophies}` : null,
+        season.cupTrophies ? `🏅×${season.cupTrophies}` : null,
+        season.bigBuy ? `in: ${season.bigBuy.name} ${moneyShort(season.bigBuy.amount)}` : null,
+        season.bigSell ? `out: ${season.bigSell.name} ${moneyShort(season.bigSell.amount)}` : null,
+      ].filter(Boolean);
+      facts.textContent = bits.join(' · ');
+      row.appendChild(facts);
+      panel.appendChild(row);
+    }
+    frag.appendChild(panel);
+  }
+
+  const me = el('div', 'panel');
+  me.appendChild(el('h2', null, '🧑‍💼 The manager'));
+  const trophies = doc.seasons.reduce((a, x) => a + x.leagueTrophies + x.cupTrophies, 0);
+  me.appendChild(
     table(
       ['Measure', { label: 'Value', num: true }],
       [
-        ['Senior players', { text: s2.squadSize, num: true }],
-        ['Academy prospects', { text: s2.academySize, num: true }],
-        ['Mean overall', { text: s2.meanOverall ?? '—', num: true, tier: s2.meanOverall }],
-        ['Mean ceiling', { text: s2.meanPotential ?? '—', num: true, tier: s2.meanPotential }],
-        ['Mean age', { text: s2.meanAge ?? '—', num: true }],
-        ['Minutes played', { text: s2.totalMinutes.toLocaleString('en-GB'), num: true }],
-        ['Wage bill', { text: money(s2.wageBill), num: true }],
+        ['Seasons managed', { text: doc.seasons.length, num: true }],
+        ['Trophies', { text: trophies, num: true }],
+        ['Your wage', { text: money(doc.board.wage), num: true }],
+        ['Career earnings', { text: money(doc.board.totalEarnings), num: true }],
       ],
     ),
   );
+  if (doc.board.bigWin || doc.board.bigLoss) {
+    const rec = [];
+    if (doc.board.bigWin) rec.push(`Biggest win ${doc.board.bigWin.userScore}–${doc.board.bigWin.oppScore} v ${doc.board.bigWin.opponent} (${fmtDate(doc.board.bigWin.date)})`);
+    if (doc.board.bigLoss) rec.push(`worst loss ${doc.board.bigLoss.userScore}–${doc.board.bigLoss.oppScore} v ${doc.board.bigLoss.opponent} (${fmtDate(doc.board.bigLoss.date)})`);
+    me.appendChild(el('p', 'tipline', rec.join(' · ') + '.'));
+  }
+  frag.appendChild(me);
+  return frag;
+}
 
+/** Every real manager in this world, by the game's own star rating. */
+function renderManagerMarket(doc) {
+  const frag = document.createDocumentFragment();
+  const c = doc.coaching;
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, '🌍 Manager market'));
+  const rows = (c?.market ?? []).slice(0, 100);
+  if (rows.length) {
+    panel.appendChild(
+      table(
+        ['Manager', 'Club', 'League', 'From', { label: 'Age', num: true }, { label: 'Stars', num: true }],
+        rows.map((m) => [
+          m.name,
+          m.club ?? '—',
+          m.league ?? '—',
+          `${flagFor(m.nation)}${m.nation ?? '—'}`,
+          { text: m.age ?? '—', num: true },
+          { text: m.stars ?? '—', num: true, title: 'The game\u2019s own star rating, decoded from the save' },
+        ]),
+      ),
+    );
+    panel.appendChild(
+      el('p', 'muted tiny', `Top ${rows.length} of ${c?.market?.length ?? 0} real managers in this world, by the game's own star rating — national coaches and every league system included. Squad › Coach filters this down to poachable club managers.`),
+    );
+  } else {
+    panel.appendChild(el('p', 'muted tiny', 'No manager records in this save.'));
+  }
+  frag.appendChild(panel);
+  return frag;
+}
+
+/** Finances: what the save actually persists, labelled where it does not. */
+function renderFinances(doc) {
+  const frag = document.createDocumentFragment();
+  const f = doc.finances ?? {};
+  const grid = el('div', 'grid');
+  const panel = (title, node, note) => {
+    const p2 = el('div', 'panel');
+    p2.appendChild(el('h2', null, title));
+    p2.appendChild(node);
+    if (note) p2.appendChild(el('p', 'muted tiny', note));
+    grid.appendChild(p2);
+  };
+  const val = (v) => ({ text: v !== null && v !== undefined ? money(v) : 'not persisted', num: true });
+  panel(
+    '🏦 Budgets',
+    table(
+      ['Measure', { label: 'Value', num: true }],
+      [
+        ['Transfer budget', val(f.transferBudget)],
+        ['Wage budget', val(f.wageBudget)],
+        ['Start-of-season transfer budget', val(f.startTransferBudget)],
+        ['Start-of-season wage budget', val(f.startWageBudget)],
+      ],
+    ),
+    'The game keeps live budgets in memory and writes zeros to disk (verified across saves) — "not persisted" is the honest reading, never a claim that you are broke.',
+  );
+  panel(
+    '💼 The club',
+    table(
+      ['Measure', { label: 'Value', num: true }],
+      [
+        ['Club worth', val(f.clubWorth)],
+        ['Weekly wage bill', { text: money(f.wageBill ?? 0), num: true }],
+        ['Profitability', { text: f.profitability ?? '—', num: true, title: 'The game\u2019s own 1–10 scale' }],
+        ['Domestic prestige', { text: f.domesticPrestige ?? '—', num: true, title: '1–10' }],
+        ['International prestige', { text: f.internationalPrestige ?? '—', num: true, title: '1–10' }],
+        ['Youth development rating', { text: f.youthDevelopment ?? '—', num: true, title: 'The game\u2019s own 1–10 facility scale — it shapes what the academy produces' }],
+      ],
+    ),
+  );
+  panel(
+    '🧑‍💼 You',
+    table(
+      ['Measure', { label: 'Value', num: true }],
+      [
+        ['Your wage', val(f.managerWage)],
+        ['Career earnings', val(f.totalEarnings)],
+        ['Board financial strictness', { text: f.financialStrictness ?? '—', num: true }],
+      ],
+    ),
+  );
   frag.appendChild(grid);
-  frag.appendChild(summary);
+  return frag;
+}
+
+/** Live scenarios: verified absent from the save, said plainly. */
+function renderChallenges(doc) {
+  const frag = document.createDocumentFragment();
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, '🎯 Challenges'));
+  panel.appendChild(
+    el('p', 'muted', 'The game\u2019s live scenarios and challenge details are not written into the career save — a full sweep of every table and every blob section finds nothing to read. When they reach the disk, this tab lights up.'),
+  );
+  panel.appendChild(
+    el('p', 'muted tiny', settings.rpg
+      ? 'Meanwhile RPG mode is on: Companion runs its own campaign layer — career milestones, phase missions and micro missions, all computed from your real save. They live on the Story tab.'
+      : 'Meanwhile: switch on RPG mode under Customise and Companion runs its own campaign layer — career milestones, phase missions and micro missions, all computed from your real save.'),
+  );
+  frag.appendChild(panel);
+  void doc;
   return frag;
 }
 
@@ -2534,6 +2891,7 @@ function storyCaption(doc) {
     out.push(`💥 biggest win ${doc.board.bigWin.userScore}–${doc.board.bigWin.oppScore} v ${doc.board.bigWin.opponent}`);
   }
   if (f.absurd.length) out.push(f.absurd[0]);
+  out.push('📟 tracked on Companion — the second screen reading the save itself');
   out.push('#FC26 #CareerMode');
   return out.join(String.fromCharCode(10));
 }
@@ -2996,7 +3354,7 @@ function campaignLine(doc) {
   return `Chapter ${doc.season}: ${cur.wins}W ${cur.draws}D ${cur.losses}L, ${cur.goalsFor}:${cur.goalsAgainst} — ${arc}.`;
 }
 
-function renderOverview(doc) {
+function renderCentral(doc) {
   const frag = document.createDocumentFragment();
   const grid = el('div', 'grid');
   const panel = (title, node, cls) => {
@@ -3006,11 +3364,15 @@ function renderOverview(doc) {
     grid.appendChild(p2);
     return p2;
   };
-  const go = (view) => {
+  const go = (view, sub) => {
     const b = el('button', 'ghost tiny-btn', 'Open ›');
     activatable(b, () => {
       state.view = view;
       localStorage.setItem('view', view);
+      if (sub) {
+        state.subs[view] = sub;
+        localStorage.setItem('subs', JSON.stringify(state.subs));
+      }
       render();
     });
     return b;
@@ -3020,6 +3382,21 @@ function renderOverview(doc) {
   const cur = doc.seasons[doc.seasons.length - 1];
   {
     const box = el('div');
+    // The game's first screen leads with the day. Ours leads with the estimate
+    // the save supports, plus the windows that decide what this week means.
+    if (doc.gameDate) {
+      const d = new Date(Math.floor(doc.gameDate / 10000), Math.floor((doc.gameDate % 10000) / 100) - 1, doc.gameDate % 100);
+      const bar = el('div', 'datebar');
+      const day = el('span', 'dateday');
+      day.textContent = `${d.toLocaleDateString('en-GB', { weekday: 'long' })}, ${d.toLocaleDateString('en-GB', { month: 'short', day: '2-digit' })}`.toUpperCase();
+      day.dataset.tip = 'Estimated from the newest dated record in the save — there is no live date field.';
+      bar.appendChild(day);
+      bar.appendChild(el('span', 'dateyear', String(Math.floor(doc.gameDate / 10000))));
+      for (const w of doc.calendar?.windows ?? []) {
+        bar.appendChild(el('span', `chip winchip${w.openNow ? ' on' : ''}`, `${w.label} ${w.opens} → ${w.closes}${w.openNow ? ' · OPEN' : w.openNow === false ? '' : ''}`));
+      }
+      box.appendChild(bar);
+    }
     if (settings.rpg) {
       const line = campaignLine(doc);
       if (line) box.appendChild(el('p', 'tipline', line));
@@ -3062,6 +3439,89 @@ function renderOverview(doc) {
     if (doc.alerts.length > 5) box.appendChild(el('p', 'muted tiny', `+${doc.alerts.length - 5} more in the rail.`));
     if (!alerts.length) box.appendChild(el('p', 'muted tiny', 'Nothing needs you. Enjoy it.'));
     panel(`🔔 Decisions — ${doc.alerts.length}`, box);
+  }
+
+  // --- treatment room: who is out and who steps in
+  {
+    const t2 = doc.treatment ?? { injured: [], suspended: [] };
+    const box = el('div');
+    for (const r of t2.injured) {
+      const row = el('div', 'todo');
+      row.appendChild(el('b', null, '🩹 Injured'));
+      row.appendChild(el('span', 'who', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`));
+      row.appendChild(el('span', 'why', `${r.daysOut !== null ? `out ~${r.daysOut} days` : 'length unrecorded'}${r.replacement ? ` — step in: ${r.replacement.name} (fit ${r.replacement.fit})` : ''}`));
+      box.appendChild(row);
+    }
+    for (const r of t2.suspended) {
+      const row = el('div', 'todo');
+      row.appendChild(el('b', null, '🟥 Suspended'));
+      row.appendChild(el('span', 'who', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`));
+      row.appendChild(el('span', 'why', r.replacement ? `step in: ${r.replacement.name} (fit ${r.replacement.fit})` : ''));
+      box.appendChild(row);
+    }
+    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'Everyone fit, nobody banned. The physio room is empty.'));
+    panel('🏥 Treatment room', box);
+  }
+
+  // --- the league table, from the save itself
+  if (doc.leagueTable?.rows?.length) {
+    const lt = doc.leagueTable;
+    const v = (x) => ({ text: lt.started ? x : '—', num: true });
+    const box = el('div');
+    box.appendChild(
+      table(
+        [{ label: '#', num: true }, 'Club', { label: 'P', num: true }, { label: 'W', num: true }, { label: 'D', num: true }, { label: 'L', num: true }, { label: 'GF', num: true }, { label: 'GA', num: true }, { label: 'GD', num: true }, { label: 'Pts', num: true }],
+        lt.rows.map((r) => {
+          const you = r.isUser ? 'you' : '';
+          return [
+            { text: r.position ?? '—', num: true, cls: you || undefined },
+            { text: `${r.name}${r.champion ? ' 👑' : ''}`, cls: you || undefined, title: r.champion ? 'Reigning champions' : undefined },
+            { ...v(r.played), cls: you || undefined },
+            { ...v(r.wins), cls: you || undefined },
+            { ...v(r.draws), cls: you || undefined },
+            { ...v(r.losses), cls: you || undefined },
+            { ...v(r.gf), cls: you || undefined },
+            { ...v(r.ga), cls: you || undefined },
+            { ...v(r.gd), cls: you || undefined },
+            { ...v(r.points), cls: you || undefined },
+          ];
+        }),
+        { tight: true },
+      ),
+    );
+    if (!lt.started) box.appendChild(el('p', 'muted tiny', 'No league match recorded yet this season — positions carry over in the save and the numbers fill in match by match.'));
+    panel(`🏟 ${lt.league ?? 'League table'}`, box, 'span2');
+  }
+
+  // --- competitions this season
+  {
+    const comps = (doc.board?.competitions ?? []).filter((c) => c.season === doc.season);
+    if (comps.length) {
+      const box = el('div');
+      for (const c of comps) {
+        const row = el('div', 'todo');
+        row.appendChild(el('b', null, c.name));
+        row.appendChild(el('span', 'who', c.won ? '🏆 Won' : c.notStarted ? 'Not started yet' : c.result === 1 ? 'Objective met' : 'In progress'));
+        row.appendChild(el('span', 'why', ''));
+        box.appendChild(row);
+      }
+      panel('🏆 Competitions', box);
+    }
+  }
+
+  // --- the world's news feed, from persistent_events
+  if (doc.calendar?.events?.length) {
+    const box = el('div');
+    for (const e of doc.calendar.events.slice(0, 8)) {
+      const row = el('div', 'todo');
+      row.appendChild(el('b', null, fmtDate(e.date)));
+      row.appendChild(el('span', 'who', e.player ?? e.team1 ?? `event ${e.eventId}`));
+      row.appendChild(
+        el('span', 'why', e.eventId === 5 && e.team1 && e.team2 ? `${e.team1} → ${e.team2}` : e.team2 ? `${e.team1 ?? '?'} · ${e.team2}` : `event #${e.eventId}~`),
+      );
+      box.appendChild(row);
+    }
+    panel('📰 Around the world', box);
   }
 
   // --- movers
@@ -3123,9 +3583,9 @@ function renderOverview(doc) {
       box.appendChild(el('p', 'muted tiny', `Your edge, line by line, v ${opp.name}.`));
       box.appendChild(row);
     } else {
-      box.appendChild(el('p', 'muted tiny', 'Pick your next opponent on Matchday and the line-by-line edge lands here.'));
+      box.appendChild(el('p', 'muted tiny', 'Pick your next opponent under Squad › Team Management and the line-by-line edge lands here.'));
     }
-    box.appendChild(go('matchday'));
+    box.appendChild(go('squad', 'tactics'));
     panel(settings.rpg ? '⚔ Next fixture' : '🔎 Opponent', box);
   }
 
@@ -3222,10 +3682,10 @@ function renderDevelop(doc) {
 function renderShortlist(doc) {
   const frag = document.createDocumentFragment();
   const panel = el('div', 'panel');
-  panel.appendChild(el('h2', null, `⭐ Shortlist — ${shortlist.length}`));
+  panel.appendChild(el('h2', null, `👁 Watchlist — ${shortlist.length}`));
   if (!shortlist.length) {
     panel.appendChild(
-      el('p', 'muted', 'Empty. Star players on the Transfers tab and they land here with their numbers frozen at that moment — the columns then show how far they have moved since.'),
+      el('p', 'muted', 'Empty. Star players under Targets and they land here with their numbers frozen at that moment — the columns then show how far they have moved since. This list is Companion\u2019s own; the game\u2019s shortlist has its own tab.'),
     );
     frag.appendChild(panel);
     return frag;
@@ -3267,9 +3727,14 @@ function renderShortlist(doc) {
 function renderSettings() {
   const frag = document.createDocumentFragment();
   const panel = el('div', 'panel');
-  panel.appendChild(el('h2', null, '⚙ Settings'));
+  panel.appendChild(el('h2', null, '⚙ Customise'));
   panel.appendChild(el('p', 'muted', 'Switches persist in this browser. Nothing here touches the save or the store.'));
+  let lastGroup = null;
   for (const def of SETTING_DEFS) {
+    if (def.group && def.group !== lastGroup) {
+      lastGroup = def.group;
+      panel.appendChild(el('span', 'lbl-row', def.group.toUpperCase()));
+    }
     const row = el('div', 'setrow');
     const sw = el('button', `switch${settings[def.key] ? ' on' : ''}`);
     sw.appendChild(el('i', 'knob'));
@@ -3313,20 +3778,61 @@ function renderSettings() {
   return frag;
 }
 
+/**
+ * The game's own menu: Central, Squad, Transfers, Academy, Office, Customise —
+ * plus Story, ours. Sections nest the way the game's sub-menus do.
+ */
 const VIEWS = {
-  overview: { label: 'Overview', render: renderOverview, count: () => null },
-  matchday: { label: 'Matchday', render: renderMatchday, count: (d) => d.matchday.diff.filter((x) => x.savedPlayerId !== x.recommendedPlayerId).length },
-  squad: { label: 'Squad', render: (d) => renderPlayers(d.senior), count: (d) => d.senior.length, players: true },
-  youth: { label: 'Youth', render: renderYouth, count: (d) => d.academy.length, players: true },
-  develop: { label: 'Develop', render: renderDevelop, count: (d) => [...d.senior, ...d.academy].filter((p2) => (p2.headroom ?? 0) >= 2).length },
-  synergy: { label: 'Synergy', render: renderSynergy, count: (d) => d.synergy.partnerships.length },
-  transfers: { label: 'Transfers', render: renderTransfers, count: (d) => d.transfers.targets.length },
-  wages: { label: 'Wages', render: renderWages, count: (d) => d.wages.renewals.length },
-  loans: { label: 'Loans', render: renderLoans, count: (d) => d.loans.out.length + d.loans.candidates.length },
-  stats: { label: 'Stats', render: renderStats, count: () => null },
-  shortlist: { label: 'Shortlist', render: renderShortlist, count: () => (shortlist.length || null) },
+  central: { label: 'Central', render: renderCentral, count: (d) => d.alerts.length || null },
+  squad: {
+    label: 'Squad',
+    subs: [
+      { id: 'hub', label: 'Squad Hub', render: renderSquadHub, players: true },
+      { id: 'tactics', label: 'Team Management', render: renderMatchday, count: (d) => d.matchday.diff.filter((x) => x.savedPlayerId !== x.recommendedPlayerId).length || null },
+      { id: 'develop', label: 'Development', render: renderDevelop },
+      { id: 'synergy', label: 'Synergy', render: renderSynergy },
+      { id: 'wages', label: 'Wages', render: renderWages, count: (d) => d.wages.renewals.filter((r) => r.urgency === 'now').length || null },
+      { id: 'coach', label: 'Coach', render: renderCoach },
+    ],
+  },
+  transfers: {
+    label: 'Transfers',
+    subs: [
+      { id: 'targets', label: 'Targets', render: renderTransfers, count: (d) => d.transfers.targets.length || null },
+      { id: 'shortlist', label: 'Shortlist', render: renderIngameShortlist, count: (d) => d.shortlistIngame?.players?.length || null },
+      { id: 'watchlist', label: 'Watchlist', render: renderShortlist, count: () => shortlist.length || null },
+      { id: 'sell', label: 'Sell Values', render: renderSellValues },
+      { id: 'loans', label: 'Loans', render: renderLoans, count: (d) => d.loans.out.length || null },
+    ],
+  },
+  academy: {
+    label: 'Academy',
+    subs: [
+      { id: 'players', label: 'My Academy', render: (d) => renderPlayers(d.academy), players: true, count: (d) => d.academy.length || null },
+      { id: 'scouting', label: 'Scout Reports', render: renderScouting, count: (d) => d.scouts.length || null },
+    ],
+  },
+  office: {
+    label: 'Office',
+    subs: [
+      { id: 'board', label: 'Board', render: renderBoard },
+      { id: 'manager', label: 'Manager', render: renderManagerOffice },
+      { id: 'market', label: 'Manager Market', render: renderManagerMarket },
+      { id: 'finances', label: 'Finances', render: renderFinances },
+      { id: 'stats', label: 'Club Stats', render: renderStats },
+      { id: 'challenges', label: 'Challenges', render: renderChallenges },
+    ],
+  },
   story: { label: 'Story', render: renderStory, count: () => null },
-  settings: { label: '⚙', render: renderSettings, count: () => null },
+  customise: { label: 'Customise', render: renderSettings, count: () => null },
+};
+
+/** The active sub-tab of the active view, remembered per section. */
+const activeSub = () => {
+  const view = VIEWS[state.view];
+  if (!view?.subs) return null;
+  const stored = state.subs[state.view];
+  return view.subs.find((s2) => s2.id === stored) ?? view.subs[0];
 };
 
 /* ---------------- shell ---------------- */
@@ -3337,7 +3843,7 @@ function renderShell(doc) {
   for (const [id, view] of Object.entries(VIEWS)) {
     const tab = el('button', `tab${id === state.view ? ' is-active' : ''}`);
     tab.append(view.label);
-    const n = view.count(doc);
+    const n = view.count ? view.count(doc) : null;
     if (n !== null && n !== undefined) tab.appendChild(el('span', 'count', n));
     activatable(
       tab,
@@ -3351,11 +3857,36 @@ function renderShell(doc) {
     views.appendChild(tab);
   }
 
+  // Second row: the section's own sub-tabs, the way the game's menus nest.
+  const subnav = $('#subviews');
+  subnav.textContent = '';
+  const activeView = VIEWS[state.view];
+  const sub = activeSub();
+  if (activeView.subs) {
+    for (const s2 of activeView.subs) {
+      const b = el('button', `subtab${sub?.id === s2.id ? ' is-active' : ''}`);
+      b.append(s2.label);
+      const n2 = s2.count ? s2.count(doc) : null;
+      if (n2) b.appendChild(el('span', 'count', n2));
+      activatable(
+        b,
+        () => {
+          state.subs[state.view] = s2.id;
+          localStorage.setItem('subs', JSON.stringify(state.subs));
+          render();
+        },
+        { skipWhen: () => sub?.id === s2.id },
+      );
+      subnav.appendChild(b);
+    }
+  }
+  subnav.style.display = activeView.subs ? '' : 'none';
+
   const filters = $('#filters');
   filters.textContent = '';
-  const active = VIEWS[state.view];
-  if (active.players) {
-    const list = state.view === 'youth' ? doc.academy : doc.senior;
+  const wantsRoster = !!(activeView.players || sub?.players);
+  if (wantsRoster) {
+    const list = state.view === 'academy' ? doc.academy : doc.senior;
 
     const toggle = (id) => () => {
       if (state.filters.has(id)) state.filters.delete(id);
@@ -3392,8 +3923,8 @@ function renderShell(doc) {
       filters.appendChild(clear);
     }
   }
-  // Off Squad/Youth the strip only explained its own absence — give the row back.
-  filters.style.display = VIEWS[state.view]?.players ? '' : 'none';
+  // Off the rosters the strip only explained its own absence — give the row back.
+  filters.style.display = wantsRoster ? '' : 'none';
 
   const rail = $('#rail');
   rail.textContent = '';
@@ -3470,7 +4001,7 @@ function render() {
   requestAnimationFrame(() => window.scrollTo(0, scrollY));
 
 
-  main.appendChild(VIEWS[state.view].render(doc));
+  main.appendChild((activeSub()?.render ?? VIEWS[state.view].render)(doc));
 
   $('#counts').textContent =
     `${doc.senior.length} senior · ${doc.academy.length} academy · season ${doc.season ?? '?'} · ` +
@@ -3489,30 +4020,36 @@ async function load(flash = false) {
 }
 
 function wire() {
-  state.view = storedPref('view', Object.keys(VIEWS), 'squad');
+  // Old single-level view ids map into the new sections so a returning browser
+  // lands where it used to work, not on a blank tab.
+  const MIGRATE = {
+    overview: ['central'], matchday: ['squad', 'tactics'], squad: ['squad', 'hub'],
+    youth: ['academy', 'players'], develop: ['squad', 'develop'], synergy: ['squad', 'synergy'],
+    wages: ['squad', 'wages'], loans: ['transfers', 'loans'], stats: ['office', 'stats'],
+    shortlist: ['transfers', 'watchlist'], settings: ['customise'],
+  };
+  const storedView = localStorage.getItem('view');
+  // Only a browser that has never seen the two-level nav gets migrated —
+  // 'squad' is both an old id and a new one, and re-migrating on every load
+  // would clobber the remembered sub-tab.
+  if (storedView && MIGRATE[storedView] && localStorage.getItem('subs') === null) {
+    const [v2, s2] = MIGRATE[storedView];
+    localStorage.setItem('view', v2);
+    if (s2) {
+      state.subs[v2] = s2;
+      localStorage.setItem('subs', JSON.stringify(state.subs));
+    }
+  }
+  state.view = storedPref('view', Object.keys(VIEWS), 'central');
   state.sort = storedPref('sort', Object.keys(SORTS), 'ingame');
   state.filters = new Set(
     [...state.filters].filter((id) => FILTERS.some((f) => f.id === id)),
   );
 
-  // Three looks: dark, light, and FC26 — near-black with the volt green of the
-  // game's own menus, so the second screen reads as an extension of them.
-  const THEMES = ['dark', 'light', 'fc26'];
-  // Three segments, one pill: pick a theme instead of cycling blind.
-  const THEME_LABEL = { light: 'Light', dark: 'Dark', fc26: 'FC26' };
-  const seg = $('#themeseg');
-  const applyTheme = (t) => {
-    document.documentElement.dataset.theme = t;
-    localStorage.setItem('theme', t);
-    for (const b of seg.children) b.classList.toggle('on', b.dataset.theme === t);
-  };
-  for (const t of ['light', 'dark', 'fc26']) {
-    const b = el('button', 'segbtn', THEME_LABEL[t]);
-    b.dataset.theme = t;
-    activatable(b, () => applyTheme(t), { skipWhen: () => (document.documentElement.dataset.theme || 'dark') === t });
-    seg.appendChild(b);
-  }
-  applyTheme(storedPref('theme', THEMES, 'dark'));
+  // One look: FC26. The second screen reads as an extension of the game's own
+  // menus — near-black with volt green — and no longer argues about it.
+  document.documentElement.dataset.theme = 'fc26';
+  localStorage.removeItem('theme');
 
 
   const events = new EventSource('/api/events');

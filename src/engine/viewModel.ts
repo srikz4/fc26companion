@@ -256,6 +256,116 @@ export interface ViewDocument {
   regens: RegenReport;
   wages: WageReport & { assessmentList: { playerId: number; verdict: string; note: string; wage: number | null; peerMedian: number | null }[] };
   stats: StatsView;
+  /** The user's own league table, straight from leagueteamlinks. */
+  leagueTable: {
+    league: string | null;
+    rows: {
+      teamId: number;
+      name: string;
+      position: number | null;
+      played: number;
+      wins: number;
+      draws: number;
+      losses: number;
+      gf: number;
+      ga: number;
+      gd: number;
+      points: number;
+      isUser: boolean;
+      champion: boolean;
+      unbeaten: boolean;
+    }[];
+    /** False right after a season rolls, before any league match is recorded. */
+    started: boolean;
+  };
+  /** Who is out, for how long, and who steps in — the game's first screen. */
+  treatment: {
+    injured: {
+      playerId: number;
+      name: string;
+      pos: string | null;
+      overall: number | null;
+      /** career_playerlastgrowth.injuryduration, in days. Null when unrecorded. */
+      daysOut: number | null;
+      replacement: { playerId: number; name: string; fit: number } | null;
+    }[];
+    suspended: {
+      playerId: number;
+      name: string;
+      pos: string | null;
+      replacement: { playerId: number; name: string; fit: number } | null;
+    }[];
+  };
+  calendar: {
+    /** Transfer windows from career_calendar — the one live thing in that table. */
+    windows: { label: string; opens: string; closes: string; openNow: boolean | null }[];
+    /** persistent_events, newest first. Event ids are the game's own, unmapped. */
+    events: { date: number; eventId: number; team1: string | null; team2: string | null; player: string | null }[];
+  };
+  coaching: {
+    /** Every real manager in this world, star-rated by the game itself. */
+    market: {
+      managerId: number;
+      name: string;
+      club: string | null;
+      league: string | null;
+      nation: string | null;
+      age: number | null;
+      stars: number | null;
+    }[];
+    /** Best-rated managers not at your club — the Live Editor target-coach pool. */
+    targets: { managerId: number; name: string; club: string | null; stars: number | null; age: number | null }[];
+  };
+  finances: {
+    transferBudget: number | null;
+    wageBudget: number | null;
+    startTransferBudget: number | null;
+    startWageBudget: number | null;
+    clubWorth: number | null;
+    profitability: number | null;
+    domesticPrestige: number | null;
+    internationalPrestige: number | null;
+    youthDevelopment: number | null;
+    wageBill: number;
+    managerWage: number | null;
+    totalEarnings: number | null;
+    financialStrictness: number | null;
+  };
+  /** What this world would pay for each of your players, from its own observed deals. */
+  sellValues: {
+    modelled: boolean;
+    sample: number;
+    rows: {
+      playerId: number;
+      name: string;
+      age: number | null;
+      overall: number | null;
+      potential: number | null;
+      wage: number | null;
+      contractMonths: number | null;
+      low: number | null;
+      mid: number | null;
+      high: number | null;
+      /** True when the player is priced beyond any deal this world has done. */
+      offMarket: boolean;
+    }[];
+  };
+  /** The transfer shortlist exactly as the game saved it (career blob `mssm`). */
+  shortlistIngame: {
+    readable: boolean;
+    date: number | null;
+    players: {
+      playerId: number;
+      name: string;
+      club: string | null;
+      league: string | null;
+      nation: string | null;
+      age: number | null;
+      overall: number | null;
+      potential: number | null;
+      fee: { low: number; mid: number; high: number } | null;
+    }[];
+  };
   warnings: string[];
 }
 
@@ -359,6 +469,8 @@ interface BuildInput {
   nations?: Map<number, string>;
   /** competition code -> name, from data/competitions.csv. */
   competitions?: Map<string, string>;
+  /** In-game shortlist read from the save's career blob; null when unreadable. */
+  shortlist?: { ids: number[]; date: number | null } | null;
 }
 
 export function buildViewDocument(input: BuildInput): ViewDocument {
@@ -1290,6 +1402,248 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     bigLoss: scoreline('loss'),
   };
 
+  // --- the league table, straight from leagueteamlinks -----------------------
+  // Positions persist across the summer; W/D/L and points reset when the season
+  // rolls, so "played" is their sum rather than nummatchesplayed (which is
+  // observed stale at a season boundary).
+  const leagueRows = rowsOf(tables, 'leagueteamlinks')
+    .filter((l) => num(l, 'leagueid') === userLeagueId)
+    .map((l) => {
+      const teamId = num(l, 'teamid') ?? -1;
+      const wins = (num(l, 'homewins') ?? 0) + (num(l, 'awaywins') ?? 0);
+      const draws = (num(l, 'homedraws') ?? 0) + (num(l, 'awaydraws') ?? 0);
+      const played = wins + draws + ((num(l, 'homelosses') ?? 0) + (num(l, 'awaylosses') ?? 0));
+      const gf = (num(l, 'homegf') ?? 0) + (num(l, 'awaygf') ?? 0);
+      const ga = (num(l, 'homega') ?? 0) + (num(l, 'awayga') ?? 0);
+      return {
+        teamId,
+        name: teamNames.get(teamId) ?? `team ${teamId}`,
+        position: num(l, 'currenttableposition'),
+        played,
+        wins,
+        draws,
+        losses: played - wins - draws,
+        gf,
+        ga,
+        gd: gf - ga,
+        points: num(l, 'points') ?? 0,
+        isUser: teamId === clubId,
+        champion: (num(l, 'champion') ?? 0) !== 0,
+        unbeaten: (num(l, 'unbeatenleague') ?? 0) !== 0,
+      };
+    })
+    .sort((a, b) => (a.position ?? 99) - (b.position ?? 99) || b.points - a.points);
+  const leagueTable = {
+    league: leagueNameOf.get(userLeagueId ?? -1) ?? null,
+    rows: leagueRows,
+    started: leagueRows.some((r) => r.played > 0),
+  };
+
+  // --- treatment room: who is out and who steps in ----------------------------
+  const injuryDays = new Map<number, number>();
+  for (const g of rowsOf(tables, 'career_playerlastgrowth')) {
+    const pid = num(g, 'playerid');
+    const days = num(g, 'injuryduration');
+    if (pid !== null && days !== null && days > 0) injuryDays.set(pid, days);
+  }
+  const standIn = (outId: number): { playerId: number; name: string; fit: number } | null => {
+    const row = players.get(outId);
+    const slot = row ? slotOf(num(row, 'preferredposition1')) : null;
+    if (!slot) return null;
+    let best: { playerId: number; name: string; fit: number } | null = null;
+    for (const r of seniorRows) {
+      const pid = num(r, 'playerid')!;
+      if (pid === outId || availability.has(pid)) continue;
+      const fit = fitFor(r, slot)?.value ?? null;
+      if (fit !== null && (best === null || fit > best.fit)) {
+        best = { playerId: pid, name: nameOf(pid), fit: Math.round(fit * 10) / 10 };
+      }
+    }
+    return best;
+  };
+  const treatment = {
+    injured: [...availability.entries()]
+      .filter(([, reason]) => reason === 'injured')
+      .map(([pid]) => ({
+        playerId: pid,
+        name: nameOf(pid),
+        pos: positionShort(num(players.get(pid), 'preferredposition1')),
+        overall: num(players.get(pid), 'overallrating'),
+        daysOut: injuryDays.get(pid) ?? null,
+        replacement: standIn(pid),
+      })),
+    suspended: [...availability.entries()]
+      .filter(([, reason]) => reason === 'suspended')
+      .map(([pid]) => ({
+        playerId: pid,
+        name: nameOf(pid),
+        pos: positionShort(num(players.get(pid), 'preferredposition1')),
+        replacement: standIn(pid),
+      })),
+  };
+
+  // --- calendar: transfer windows and the world's event feed ------------------
+  const cal = rowsOf(tables, 'career_calendar')[0];
+  const mmdd = (n: number | null): string =>
+    n === null ? '—' : `${String(Math.floor(n / 100)).padStart(2, '0')}-${String(n % 100).padStart(2, '0')}`;
+  const nowMmdd = gameDate.date !== null ? gameDate.date % 10000 : null;
+  const windowOpen = (start: number | null, end: number | null): boolean | null => {
+    if (start === null || end === null || nowMmdd === null) return null;
+    return start <= end ? nowMmdd >= start && nowMmdd <= end : nowMmdd >= start || nowMmdd <= end;
+  };
+  const calendar = {
+    windows: [
+      {
+        label: 'Summer window',
+        opens: mmdd(num(cal, 'transferwindowstart1')),
+        closes: mmdd(num(cal, 'transferwindowend1')),
+        openNow: windowOpen(num(cal, 'transferwindowstart1'), num(cal, 'transferwindowend1')),
+      },
+      {
+        label: 'Winter window',
+        opens: mmdd(num(cal, 'transferwindowstart2')),
+        closes: mmdd(num(cal, 'transferwindowend2')),
+        openNow: windowOpen(num(cal, 'transferwindowstart2'), num(cal, 'transferwindowend2')),
+      },
+    ],
+    events: rowsOf(tables, 'persistent_events')
+      .map((e) => ({
+        date: num(e, 'eventdate') ?? 0,
+        eventId: num(e, 'eventid') ?? -1,
+        team1: teamNames.get(num(e, 'team1id') ?? -1) ?? null,
+        team2: teamNames.get(num(e, 'team2id') ?? -1) ?? null,
+        player: (num(e, 'player1id') ?? -1) > 0 ? nameOf(num(e, 'player1id')!) : null,
+      }))
+      .filter((e) => e.date >= 20200101)
+      .sort((a, b) => b.date - a.date)
+      .slice(0, 14),
+  };
+
+  // --- the manager market -----------------------------------------------------
+  // manager.starrating stores IEEE-754 float bits (1082130432 is 4.0); decoded
+  // and verified against known managers (Arteta 4.5, Emery 4.0).
+  const starOf = (raw: number | null): number | null => {
+    if (raw === null) return null;
+    if (raw >= 0 && raw <= 5) return raw;
+    const buf = Buffer.alloc(4);
+    buf.writeUInt32LE(raw >>> 0, 0);
+    const f = buf.readFloatLE(0);
+    return f >= 0 && f <= 5 ? Math.round(f * 2) / 2 : null;
+  };
+  const market = rowsOf(tables, 'manager')
+    .map((m) => {
+      const teamId = num(m, 'teamid');
+      const nameStr =
+        (typeof m['commonname'] === 'string' && m['commonname']) ||
+        [m['firstname'], m['surname']].filter((v) => typeof v === 'string' && v).join(' ');
+      return {
+        managerId: num(m, 'managerid') ?? -1,
+        name: nameStr || `manager ${num(m, 'managerid')}`,
+        club: teamNames.get(teamId ?? -1) ?? null,
+        league: teamId !== null ? (leagueOfTeam.get(teamId) ?? null) : null,
+        nation: nationName(num(m, 'nationality')),
+        age: ageAt(num(m, 'birthdate'), gameDate.date),
+        stars: starOf(num(m, 'starrating')),
+        teamId,
+      };
+    })
+    .sort((a, b) => (b.stars ?? 0) - (a.stars ?? 0) || (a.age ?? 99) - (b.age ?? 99));
+  const coaching = {
+    market: market.map(({ teamId: _t, ...rest }) => rest),
+    // Poachable picks: highest-rated managers employed at clubs in this
+    // career's own leagues (national coaches and the other gender's game are
+    // in the market list, not here), youngest first among equals.
+    targets: market
+      .filter((m) => m.teamId !== clubId && m.teamId !== null && leagueIdOfTeam.has(m.teamId) && (m.stars ?? 0) >= 4)
+      .slice(0, 8)
+      .map((m) => ({ managerId: m.managerId, name: m.name, club: m.club, stars: m.stars, age: m.age })),
+  };
+
+  // --- finances ---------------------------------------------------------------
+  // Budgets read zero in every observed save (spec.md); zeros are shown as the
+  // save holds them, labelled, never invented.
+  const pref = rowsOf(tables, 'career_managerpref')[0];
+  const nz = (v: number | null): number | null => (v === null || v === 0 ? null : v);
+  const finances = {
+    transferBudget: nz(num(pref, 'transferbudget')),
+    wageBudget: nz(num(pref, 'wagebudget')),
+    startTransferBudget: nz(num(pref, 'startofseasontransferbudget')),
+    startWageBudget: nz(num(pref, 'startofseasonwagebudget')),
+    clubWorth: num(club, 'clubworth'),
+    profitability: num(club, 'profitability'),
+    domesticPrestige: num(club, 'domesticprestige'),
+    internationalPrestige: num(club, 'internationalprestige'),
+    youthDevelopment: num(club, 'youthdevelopment'),
+    wageBill: wages.totalBill,
+    managerWage: num(mi, 'wage'),
+    totalEarnings: num(mi, 'totalearnings'),
+    financialStrictness: num(pref, 'boardfinancialstrictness'),
+  };
+
+  // --- sell values: this world's own market, applied to your own squad --------
+  const sellValues = {
+    modelled: dealsModel.estimate !== null,
+    sample: dealsModel.sample,
+    rows: senior
+      .map((p) => {
+        const est =
+          dealsModel.estimate && p.overall !== null && p.age !== null && p.potential !== null
+            ? dealsModel.estimate(p.overall, p.age, p.potential)
+            : null;
+        return {
+          playerId: p.playerId,
+          name: p.name,
+          age: p.age,
+          overall: p.overall,
+          potential: p.potential,
+          wage: p.wage,
+          contractMonths: p.contractMonths,
+          low: est?.low ?? null,
+          mid: est?.mid ?? null,
+          high: est?.high ?? null,
+          offMarket: dealsModel.estimate !== null && est === null,
+        };
+      })
+      .sort((a, b) => (b.mid ?? 0) - (a.mid ?? 0)),
+  };
+
+  // --- the in-game shortlist (career blob mssm) -------------------------------
+  const shortlistIngame = {
+    readable: input.shortlist !== null && input.shortlist !== undefined,
+    date: input.shortlist?.date ?? null,
+    players: (input.shortlist?.ids ?? []).map((pid) => {
+      const row = players.get(pid);
+      // Prefer the domestic-club link: a shortlisted international's first
+      // link row can be his national team, which is not where you'd bid.
+      const teamId =
+        rowsOf(tables, 'teamplayerlinks')
+          .filter((l) => num(l, 'playerid') === pid)
+          .map((l) => num(l, 'teamid'))
+          .find((tid): tid is number => tid !== null && leagueIdOfTeam.has(tid)) ??
+        clubOf.get(pid) ??
+        null;
+      const est =
+        dealsModel.estimate && row
+          ? dealsModel.estimate(
+              num(row, 'overallrating') ?? 0,
+              ageAt(num(row, 'birthdate'), gameDate.date) ?? 25,
+              num(row, 'potential') ?? 0,
+            )
+          : null;
+      return {
+        playerId: pid,
+        name: nameOf(pid),
+        club: teamNames.get(teamId ?? -1) ?? null,
+        league: teamId !== null ? (leagueOfTeam.get(teamId) ?? null) : null,
+        nation: nationName(num(row, 'nationality')),
+        age: ageAt(num(row, 'birthdate'), gameDate.date),
+        overall: num(row, 'overallrating'),
+        potential: num(row, 'potential'),
+        fee: est ? { low: est.low, mid: est.mid, high: est.high } : null,
+      };
+    }),
+  };
+
   const regens = buildRegenReport({
     players,
     links,
@@ -1418,6 +1772,13 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       })),
     },
     stats,
+    leagueTable,
+    treatment,
+    calendar,
+    coaching,
+    finances,
+    sellValues,
+    shortlistIngame,
     warnings,
   };
 }

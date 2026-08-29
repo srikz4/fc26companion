@@ -14,6 +14,7 @@ import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadDbMeta } from '../src/parser/meta.ts';
 import { parseSave, type Tables } from '../src/parser/dbReader.ts';
+import { readShortlist } from '../src/parser/careerBlob.ts';
 import { HistoryStore, readCareerIdentity } from '../src/store/store.ts';
 import { SaveWatcher } from '../src/watcher/watcher.ts';
 import { listManagerCareerSaves, resolveSaveDirectory } from '../src/core/saveLocation.ts';
@@ -92,10 +93,15 @@ async function main(): Promise<void> {
         return;
       }
 
-      const parsedAll: Tables[] = present.map(
-        (s) => parseSave(readFileSync(s.path), meta).tables,
-      );
+      const bytesAll = present.map((s) => readFileSync(s.path));
+      const parsedAll: Tables[] = bytesAll.map((b) => parseSave(b, meta).tables);
       const tables = parsedAll[0]!;
+      // The in-game shortlist lives in the tagged career blob after the
+      // databases, not in a table — read it from the newest save's raw bytes.
+      const playerIds = new Set(
+        (tables['players'] ?? []).map((p) => p['playerid']).filter((v): v is number => typeof v === 'number'),
+      );
+      const shortlist = readShortlist(bytesAll[0]!, (id) => playerIds.has(id));
       const resolver = createNameResolver(tables, names, deriveNameIds(parsedAll, names));
 
       // Match the store's career to the save we are rendering, so history and
@@ -114,6 +120,7 @@ async function main(): Promise<void> {
         nameTableSize: names.byPlayerId.size,
         nations,
         competitions,
+        shortlist,
       });
 
       console.log(

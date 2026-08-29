@@ -84,6 +84,8 @@ export interface RenewalProposal {
   urgency: 'now' | 'soon' | 'later';
   options: RenewalOption[];
   releaseClause: ReleaseClauseAdvice;
+  /** Longest total term the game will take at this age (empirical, see maxTermYears). */
+  maxYears: number;
 }
 
 export interface WageReport {
@@ -221,12 +223,29 @@ export function buildWageReport(players: WageInput[]): WageReport {
   };
 }
 
-/** Worth proposing for: a deal running down, or someone paid below his band. */
+/**
+ * A proposal exists for everyone the club could genuinely sit down with — the
+ * only players without one are those the save records no wage for at all.
+ * Whether to renew early is the manager's call, not this file's.
+ */
 function shouldPropose(p: WageInput): boolean {
-  if (p.wage === null || p.wage <= 0) return false;
-  const running = p.contractMonths !== null && p.contractMonths <= 24;
-  const improving = (p.headroom ?? 0) >= 3;
-  return running || improving;
+  return p.wage !== null && p.wage > 0;
+}
+
+/**
+ * The longest total term the game will realistically agree to, by age.
+ * Observed FC 26 behaviour: contracts cap at six years and only the youngest
+ * players get there; most accept up to five, and the ceiling shortens with
+ * age. Empirical — refined whenever an in-game negotiation contradicts it.
+ */
+export function maxTermYears(age: number | null): number {
+  if (age === null) return 5;
+  if (age <= 17) return 6;
+  if (age <= 27) return 5;
+  if (age <= 29) return 4;
+  if (age <= 31) return 3;
+  if (age <= 33) return 2;
+  return 1;
 }
 
 const round = (n: number, to: number): number => Math.max(to, Math.round(n / to) * to);
@@ -246,7 +265,9 @@ export function proposeRenewal(p: WageInput, bandMedian: number | null): Renewal
   const headroom = p.headroom ?? 0;
   const months = p.contractMonths;
 
-  const years = age <= 21 && headroom >= 6 ? 5 : age <= 25 ? 4 : age <= 29 ? 3 : age <= 32 ? 2 : 1;
+  // Offer the longest term the game will take. How long to actually sign for
+  // is the manager's preference; the ceiling is the useful fact.
+  const years = maxTermYears(age);
 
   // The anchor is the band's median, or the player's own wage when the band is too thin
   // to say anything. Growth still to come argues for more; no growth left argues
@@ -328,6 +349,7 @@ export function proposeRenewal(p: WageInput, bandMedian: number | null): Renewal
     urgency: months === null ? 'later' : months <= 6 ? 'now' : months <= 18 ? 'soon' : 'later',
     options,
     releaseClause,
+    maxYears: maxTermYears(p.age),
   };
 }
 

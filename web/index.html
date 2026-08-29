@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Companion</title>
-    <script>/* data-theme bootstrap */try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+    <script>document.documentElement.dataset.theme = 'fc26';</script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -16,10 +16,10 @@
         <span id="club">—</span>
         <span id="game-date" title="Estimated — the save has no live date field">—</span>
         <span id="synced">never synced</span>
-        <div class="themeseg" id="themeseg" role="group" aria-label="Theme"></div>
       </div>
     </header>
 
+    <nav class="subviews" id="subviews" aria-label="Section"></nav>
     <div class="filters" id="filters"></div>
     <div class="rail collapsed" id="rail"></div>
     <div id="warnings" class="warnings" hidden></div>
