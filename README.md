@@ -22,10 +22,20 @@ Customise — and adds what the game keeps to itself:
   kick-off. A club three deep in wins is marked against its win column, and five deep is marked
   harder; the same for defeats and for draws. A key under the table names every mark, whether or
   not today's table shows one. Plus the matchday round-up from the rest of Europe.
-- **Treatment room** with recovery times and computed stand-ins, transfer windows, and the world's
-  transfer feed.
-- **Valuations**: an EA-style fair value with a walk-away floor and a negotiation ceiling, plus what
-  your world's own completed deals have actually paid.
+- **Treatment room** — who is out, how many days are left of it, and who covers. Cover is only
+  suggested for someone who was actually in the XI you saved: a player you have dropped to the
+  reserves leaves no gap to fill.
+- **Form marks on the squad.** A hat-trick burns, a run of defeats freezes, and the badge follows
+  the role — a centre-back who has not been beaten in three does not wear a striker's flame. Read
+  off the match ratings the game itself gave, over the window the save keeps.
+- **A negotiation guide, not just a valuation.** What to open at, what it will probably take, when
+  you are paying over the odds — and the wage to expect alongside it. Built from the fees clubs in
+  your own world have actually paid, because what a player is *worth* and what a club will *accept*
+  are different questions. Where a player is beyond anything this world has traded, the number is
+  still shown and plainly labelled as a continuation of the curve rather than a reading of it.
+- **Pick any save file.** Companion follows the newest save the game writes, or any file you point
+  it at — one restored from a backup, or copied off another machine. Choosing one moves the watcher
+  onto its folder, so it stays as live as the game's own.
 - **Wage and contract guidance** for every player with a recorded wage, with two package shapes and
   the longest term the game will accept at that age.
 - **Synergy** — who supplies whom and how strongly, from attributes and PlayStyles.
@@ -57,10 +67,16 @@ page; phone addresses are printed in the server window. Save in game and the pag
   phone access on your own network is an explicit flag (`--lan`, the launcher's default —
   `Companion.vbs --local` turns it off).
 - **Real data only.** Every number traces to a field in your save or to arithmetic over them.
-  Models (position fit, fees) are fitted on your save's own world and refuse to extrapolate.
-  Derived figures wear a `~` and never drive a recommendation.
+  Models (position fit, fees, wages) are fitted on your save's own world. Derived figures wear a
+  `~` and never drive a recommendation.
+- **Say where the evidence stops.** A model asked about a player outside anything its world has
+  traded still answers, and labels the answer as the curve continued past its evidence, naming the
+  range it does stand on. A guess you can see is useful; a guess wearing a confident face is not.
 - **No pretending.** A feature with nothing behind it says so rather than shipping a plausible
-  placeholder — AI mode is switched off and marked unavailable for exactly that reason.
+  placeholder. AI mode is switched off and marked unavailable. Season appearances and goals are not
+  shown at all, because the save's own fields for them disagree with the game's screen (see
+  [what is missing](docs/usage.md#what-companion-does-not-show)). Suspensions are not shown, because
+  they have not been decoded. A wrong number is worse than an admitted gap.
 
 ## Disclaimers
 

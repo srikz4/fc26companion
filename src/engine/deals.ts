@@ -13,11 +13,18 @@
  * a dozen-odd samples that band is wide, and showing it wide is the point —
  * a range fitted on 15 real deals, honestly labelled, over a made-up number.
  *
- * The model refuses to extrapolate. A log-linear fit behaves inside the range it
- * was fitted on and explodes outside it — the first live run priced a 92-rated
- * wonderkid at 643M–2.5B, because no deal in this world has gone past 50M and
- * the exponential kept climbing anyway. A player beyond the observed market
- * gets null, and the UI says so: "bigger than any deal this world has done".
+ * The model labels extrapolation rather than refusing it, which took two goes
+ * to get right. A log-linear fit behaves inside the range it was fitted on and
+ * explodes outside it — an early run priced a 92-rated wonderkid at 643M–2.5B,
+ * because no deal in this world had gone past 50M and the exponential kept
+ * climbing. Refusing to answer fixed that and created a worse problem: sixty-two
+ * of seventy targets came back blank, which is not a tool.
+ *
+ * So the curve is bounded and shown. The bound saturates rather than clips —
+ * clipping made every player past the evidence read the same number, throwing
+ * away ordering the fit is still sure about — and every extrapolated figure is
+ * marked, with the rating range the model does stand on. Read those as an order
+ * of magnitude, and trust the floor over the middle.
  */
 import type { Row } from '../parser/dbReader.ts';
 

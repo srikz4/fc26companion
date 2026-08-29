@@ -49,10 +49,16 @@ From then on it is one double-click: if the server is already running it just op
 ## Where things live
 
 - **Save files** are read from `%LOCALAPPDATA%\EA SPORTS FC 26\settings\` — found automatically.
+  You can point Companion at any other file instead, under **Customise → Save file**; the watcher
+  follows whichever folder that file is in.
 - **History** lives in `store\history.sqlite` inside the app folder: a snapshot of every save it
-  has seen, plus the **story ledger** of what happened and when it was first seen. Delete it and
-  Companion rebuilds from the next save, losing season-trend history and every dated event.
-- **Snapshots** (byte-for-byte copies of each save it parsed) live in `snapshots\`.
+  has seen, the **story ledger** of what happened and when it was first seen, and the fixture-slot
+  names learned so far. Delete it and Companion rebuilds from the next save, losing season-trend
+  history, every dated event, and the club names on the league table until they are learned again.
+- **Snapshots** (byte-for-byte copies of each save it parsed) live in `snapshots\`. These are what
+  `npm run backfill:fixtures` reads, so keeping them is what lets the league table fill in.
+- **Which save you chose** is remembered in `store\save-choice.json`. It is per-machine and is not
+  part of the repository.
 - Companion **never writes** to the game's folders.
 
 ## History, and why it starts today
@@ -61,6 +67,21 @@ Companion can only witness what it is running for. The first time it reads a sav
 career's own record — past seasons, trophies, the record scorelines — but those carry no date,
 because the save does not hold one. Everything from that point on is dated the day it was first
 seen and never rewritten. Leave it running as you play and the Chronicle fills in properly.
+
+## Commands you may want
+
+Everything runs from the app folder.
+
+| Command | What it does |
+| --- | --- |
+| `npm run serve` | The app. `-- --lan` for phone access, `-- --port 5000` to move it. |
+| `npm run backfill:fixtures` | Reads club names for the league table out of every archived save. `-- --reset` re-derives from scratch. |
+| `npm run import:faces` | Fetches player headshots once, on your instruction. |
+| `npm run import:names` | Rebuilds the name table. |
+| `npm test` | The test suite. |
+
+There are two more for decoding work — `experiment:baseline` and `experiment:stats` — documented in
+the scripts themselves. They are for investigating what the save holds, not for daily use.
 
 ## Moving to a new PC and keeping history
 
@@ -83,6 +104,12 @@ Delete the folder. Nothing is installed anywhere else — no registry entries, n
 - **Phone can't connect** — same Wi-Fi? Launcher run without `--local`? Check the firewall
   allowed Node on private networks.
 - **Faces are initials** — run `npm run import:faces` once, then refresh.
+- **You want Companion to read a different save** — Customise → Save file. It lists what it finds
+  and takes a full path for anything else, including a save copied from another machine. Choosing
+  one moves the watcher onto its folder.
+- **The shortlist shows players you removed in game** — the save is behind the game, not Companion.
+  The game rewrites its shortlist section only now and then; the panel shows the date the save
+  actually holds so you can see how far back it goes.
 - **League table rows say "not yet named"** — the save files fixtures by slot rather than by club,
   and a slot is named only when a save proves whose it is. Run `npm run backfill:fixtures` to read
   those proofs out of every save already archived; one season's worth usually names a whole

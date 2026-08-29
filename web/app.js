@@ -1620,13 +1620,14 @@ function renderMatchday(doc) {
     }
     top.appendChild(roles);
   }
-  // Opponent scout: the save holds no fixture list, but it holds every
+  // Opponent scout: the fixture list names your next opponent once that slot
+  // has a club against it, and the picker starts there. It also holds every
   // opponent's squad — pick who you play next and read the lines.
   if (doc.opponents?.length > 1) {
     const panel = el('div', 'panel');
     panel.appendChild(el('h2', null, settings.rpg ? '⚔ Boss scouting' : '🔎 Opponent scout'));
     panel.appendChild(
-      el('p', 'muted tiny', 'The save has no fixture list, so pick the club you play next. Lines are the mean rating of their best XI: keeper, back four, middle four, front three.'),
+      el('p', 'muted tiny', 'Starts on your next league opponent, from the save\u2019s own fixture list \u2014 pick any other club to compare. Lines are the mean rating of their best XI: keeper, back four, middle four, front three.'),
     );
     const mine = doc.opponents.find((o) => o.teamId === doc.club?.id);
     // Nation (flags) -> league -> team, the way you would actually look one up.

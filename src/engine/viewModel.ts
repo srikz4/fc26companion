@@ -288,9 +288,10 @@ export interface ViewDocument {
   deals: { observed: DealsModel['deals']; sample: number; modelled: boolean };
   /**
    * Every club in your own league, measured line by line. The save has no
-   * fixture list (verified — §1.7), so it cannot say who is next; it does
-   * hold every opponent's squad, so pick the club you are about to play and
-   * read how the lines compare.
+   * fixture list in its database, but it does keep one in the career blob, so
+   * the club you play next is known whenever that fixture's slot has been
+   * named. Until it is, pick the club yourself — every opponent's squad is
+   * here either way, and the lines compare the same.
    */
   opponents: {
     teamId: number;
@@ -1362,8 +1363,8 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     calibration: calibrationReport(seniorRows),
     fixtureKnown: false,
     note:
-      'The career save carries no fixture list, so there is no opponent to prepare against. ' +
-      'What is here is your own side: the XI you saved, the XI the fit table would pick, and the cost of the difference.',
+      'Your own side, whoever is next: the XI you saved, the XI the fit table would pick, and the cost of the difference. ' +
+      'The opponent comparison sits beside it and follows the fixture list when that match names its clubs.',
   };
 
   const synergy: SynergyView = {
@@ -1618,7 +1619,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   // Europe, so the scout is not fenced to your own division.
   const scoutClubs = eligibleClubs(rowsOf(tables, 'leagueteamlinks'), rowsOf(tables, 'leagues'), careerGender === 1);
   // The signable set includes reserve competitions ("Youth Squad League") that
-  // no fixture list would ever pit you against — the scout skips them.
+  // no competition would ever pit you against — the scout skips them.
   const leagueCountry = new Map<number, number>();
   const youthLeagues = new Set<number>();
   for (const l of rowsOf(tables, 'leagues')) {
