@@ -26,6 +26,19 @@ export interface ServerOptions {
   provider: ViewProvider;
   /** Bind address. Loopback unless the user opts into LAN. */
   host?: string;
+  /**
+   * Reading and changing which save file is being followed.
+   *
+   * Optional: without it the two save routes simply do not exist, and the app
+   * follows the newest save as it always did.
+   */
+  saves?: SaveControl | undefined;
+}
+
+export interface SaveControl {
+  list(): unknown;
+  /** Returns an error message, or null when the change was accepted. */
+  choose(path: string | null): string | null;
 }
 
 const MIME: Record<string, string> = {
@@ -37,8 +50,9 @@ const MIME: Record<string, string> = {
 };
 
 export class ViewServer {
-  private readonly options: Omit<Required<ServerOptions>, 'facesRoot'> & {
+  private readonly options: Omit<Required<ServerOptions>, 'facesRoot' | 'saves'> & {
     facesRoot?: string | undefined;
+    saves?: SaveControl | undefined;
   };
   private readonly clients = new Set<ServerResponse>();
   private server = createServer((req, res) => {
@@ -92,6 +106,45 @@ export class ViewServer {
         'cache-control': 'no-store',
       });
       res.end(body);
+      return;
+    }
+
+    /**
+     * Which save files are on offer, and which one is being read.
+     *
+     * Both routes are local-only in the same sense as the rest of the server:
+     * they name paths on this machine and open nothing else.
+     */
+    if (url.pathname === '/api/saves' && this.options.saves) {
+      if (req.method === 'POST') {
+        const body = await new Promise<string>((ok) => {
+          let text = '';
+          req.on('data', (c) => {
+            text += c;
+            // A path is a path; anything larger is not one.
+            if (text.length > 8192) req.destroy();
+          });
+          req.on('end', () => ok(text));
+        });
+        let wanted: string | null = null;
+        try {
+          const parsed = JSON.parse(body || '{}') as { path?: unknown };
+          wanted = typeof parsed.path === 'string' && parsed.path.length > 0 ? parsed.path : null;
+        } catch {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Expected a JSON body with a path.' }));
+          return;
+        }
+        const error = this.options.saves.choose(wanted);
+        res.writeHead(error ? 400 : 200, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(error ? { error } : this.options.saves.list()));
+        return;
+      }
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+      });
+      res.end(JSON.stringify(this.options.saves.list()));
       return;
     }
 

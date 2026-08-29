@@ -8,8 +8,8 @@
  * writing the same store is pointless (harmless, since ingest is idempotent, but
  * pointless).
  */
-import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadDbMeta } from '../src/parser/meta.ts';
@@ -22,6 +22,7 @@ import type { SlotFixture } from '../src/parser/fixtures.ts';
 import { HistoryStore, readCareerIdentity } from '../src/store/store.ts';
 import { SaveWatcher } from '../src/watcher/watcher.ts';
 import { listManagerCareerSaves, resolveSaveDirectory } from '../src/core/saveLocation.ts';
+import { readSaveChoice, rejectSavePath, writeSaveChoice, type SaveCandidate } from '../src/core/saveChoice.ts';
 import { createNameResolver, loadNameTable } from '../src/names/nameTable.ts';
 import { deriveNameIds } from '../src/names/deriveNameTable.ts';
 import { buildViewDocument, type ViewDocument } from '../src/engine/viewModel.ts';
@@ -35,6 +36,7 @@ const META_PATH = join(root, 'data', 'fifa_ng_db-meta.xml');
 const NAMES_PATH = join(root, 'data', 'playernames_fc26.csv');
 const NATIONS_PATH = join(root, 'data', 'nations_fc26.csv');
 const STORE_PATH = join(root, 'store', 'history.sqlite');
+const SAVE_CHOICE_PATH = join(root, 'store', 'save-choice.json');
 const SNAPSHOT_DIR = join(root, 'snapshots');
 const WEB_ROOT = join(root, 'web');
 
@@ -105,10 +107,25 @@ async function main(): Promise<void> {
     if (rebuilding) return;
     rebuilding = true;
     try {
-      const present = listManagerCareerSaves(saveDirectory);
+      const found = listManagerCareerSaves(saveDirectory);
+      /**
+       * A chosen file wins over the newest one.
+       *
+       * It goes at the head of the list rather than replacing it, because the
+       * others are still useful: the name table is built by comparing saves, and
+       * more of them makes it better.
+       */
+      const chosen = readSaveChoice(SAVE_CHOICE_PATH);
+      const present =
+        chosen.path === null
+          ? found
+          : [
+              { path: chosen.path, fileName: basename(chosen.path) },
+              ...found.filter((f) => f.path !== chosen.path),
+            ];
       const latest = present[0];
       if (!latest) {
-        console.log('no save yet — waiting for the game to write one.');
+        console.log('no save yet \u2014 waiting for the game to write one.');
         return;
       }
 
@@ -290,19 +307,95 @@ async function main(): Promise<void> {
     webRoot: WEB_ROOT,
     facesRoot: join(root, 'data', 'faces'),
     provider: { get: () => view ?? { error: 'no save parsed yet' } },
+    saves: {
+      list: () => {
+        const chosen = readSaveChoice(SAVE_CHOICE_PATH);
+        const seen = new Map<string, SaveCandidate>();
+        const add = (path: string, name: string): void => {
+          if (seen.has(path)) return;
+          try {
+            const st = statSync(path);
+            seen.set(path, {
+              path,
+              name,
+              sizeBytes: st.size,
+              modified: st.mtime.toISOString(),
+              active: chosen.path === null ? seen.size === 0 : path === chosen.path,
+            });
+          } catch {
+            /* a file that vanished is simply not offered */
+          }
+        };
+        if (chosen.path) add(chosen.path, basename(chosen.path));
+        for (const f of listManagerCareerSaves(saveDirectory)) add(f.path, f.fileName);
+        return {
+          following: chosen.path === null ? 'newest' : 'chosen',
+          chosenPath: chosen.path,
+          chosenAt: chosen.chosenAt,
+          watching: chosen.path ? dirname(chosen.path) : saveDirectory,
+          saveDirectory,
+          candidates: [...seen.values()],
+        };
+      },
+      choose: (path) => {
+        if (path !== null) {
+          const problem = rejectSavePath(path);
+          if (problem) return problem;
+        }
+        writeSaveChoice(SAVE_CHOICE_PATH, path);
+        retarget();
+        return null;
+      },
+    },
   });
 
-  const watcher = new SaveWatcher({ saveDirectory, snapshotDirectory: SNAPSHOT_DIR, meta, store });
-
-  watcher.on('processed', (event) => {
-    console.log(
-      `+ ${event.file}  snapshot ${event.result.snapshotId}: ` +
-        `${event.result.entities} players, ${event.result.observations.toLocaleString('en-GB')} observations`,
-    );
-    rebuild();
-    server.broadcast('refresh', { file: event.file, at: new Date().toISOString() });
+  /** Point the watcher at whichever folder holds the file we are reading. */
+  const startingChoice = readSaveChoice(SAVE_CHOICE_PATH);
+  let watcher = new SaveWatcher({
+    saveDirectory: startingChoice.path === null ? saveDirectory : dirname(startingChoice.path),
+    snapshotDirectory: SNAPSHOT_DIR,
+    meta,
+    store,
   });
-  watcher.on('error', (error, file) => console.error(`! ${file}: ${error.message}`));
+
+  const listen = (w: SaveWatcher): void => {
+    w.on('processed', (event) => {
+      console.log(
+        `+ ${event.file}  snapshot ${event.result.snapshotId}: ` +
+          `${event.result.entities} players, ${event.result.observations.toLocaleString('en-GB')} observations`,
+      );
+      rebuild();
+      server.broadcast('refresh', { file: event.file, at: new Date().toISOString() });
+    });
+    w.on('error', (error, file) => console.error(`! ${file}: ${error.message}`));
+  };
+  listen(watcher);
+
+  /**
+   * Follow a newly chosen file.
+   *
+   * The old watcher is stopped before the new one starts, so only one folder is
+   * ever being watched and a save written in either place cannot be ingested
+   * twice at once.
+   */
+  function retarget(): void {
+    const choice = readSaveChoice(SAVE_CHOICE_PATH);
+    // `saveDirectory` is proved non-null above, but a nested function declaration
+    // does not carry that narrowing with it.
+    const folder = choice.path === null ? (saveDirectory as string) : dirname(choice.path);
+    watcher.stop();
+    watcher = new SaveWatcher({ saveDirectory: folder, snapshotDirectory: SNAPSHOT_DIR, meta, store });
+    listen(watcher);
+    void watcher
+      .ingestAll()
+      .then(() => {
+        rebuild();
+        server.broadcast('refresh', { file: choice.path ?? 'newest', at: new Date().toISOString() });
+      })
+      .catch((error: unknown) => console.error(`! could not read ${folder}: ${(error as Error).message}`));
+    watcher.start();
+    console.log(`watching ${folder}${choice.path ? ` (following ${basename(choice.path)})` : ''}`);
+  }
 
   // Catch up on anything already on disk, then open the door.
   await watcher.ingestAll();

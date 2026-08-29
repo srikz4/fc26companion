@@ -1201,6 +1201,28 @@ function playerNameCell(p) {
     holder.dataset.tip = tip;
     marks.appendChild(holder);
   };
+  /**
+   * How they are playing, in the same visual language as the league table: a
+   * run that is going well burns, a run that is going badly freezes, and three
+   * is a spark where five is the thing itself. The icon follows the role, so a
+   * centre-back on a run does not wear a striker's badge.
+   */
+  const PERF_ICON = {
+    hattrick: 'flame',
+    brace: 'flame',
+    scoring: 'flame',
+    struggling: 'snowflake',
+    keeper: 'shield',
+    defender: 'shield',
+    midfielder: 'compass',
+    wide: 'zap',
+    forward: 'target',
+  };
+  const perf = p.matchForm?.mark;
+  if (perf) {
+    const glyph = PERF_ICON[perf.kind] ?? PERF_ICON[perf.role] ?? 'activity';
+    mark(`streak ${perf.tone} ${perf.depth >= 5 ? 'blaze' : 'spark'}`, glyph, perf.line);
+  }
   if (p.injured) mark('down', 'cross', 'Injured');
   if (p.nationalTeam) mark('info', 'flag', 'Away with his country');
   if (p.potentialTag === 'Special' || p.potentialTag === 'Exciting') {
@@ -5562,6 +5584,104 @@ function renderSettings() {
   landRow.appendChild(landTxt);
   intro.appendChild(landRow);
   frag.appendChild(intro);
+
+  /**
+   * Which save file Companion reads.
+   *
+   * Unlike everything else on this screen, this one is NOT a browser setting: it
+   * changes what the app is looking at, so it lives on the server and survives a
+   * restart. It also moves the watcher, which is the part worth saying out loud
+   * — a chosen file is followed just as closely as the game's own.
+   */
+  const savePanel = el('div', 'panel');
+  savePanel.appendChild(el('h2', null, 'Save file'));
+  const saveBody = el('div', 'savebody');
+  saveBody.appendChild(el('p', 'muted tiny', 'Loading\u2026'));
+  savePanel.appendChild(saveBody);
+  frag.appendChild(savePanel);
+
+  const bytesLabel = (n) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+  const paintSaves = (info) => {
+    saveBody.replaceChildren();
+    if (!info || info.error) {
+      saveBody.appendChild(el('p', 'muted tiny', info?.error ?? 'Could not read the save list.'));
+      return;
+    }
+    const following = el('p', 'muted tiny');
+    following.append(
+      info.following === 'newest'
+        ? 'Following the newest Manager Career save the game writes. '
+        : 'Following a file you chose. ',
+      `The watcher is on ${info.watching}, so a save written there \u2014 by the game or by anything else \u2014 lands on screen by itself.`,
+    );
+    saveBody.appendChild(following);
+
+    const list = el('div', 'savelist');
+    const row = (c) => {
+      const item = el('div', `saverow${c.active ? ' on' : ''}`);
+      const text = el('div', 'savetext');
+      text.appendChild(el('b', null, c.name));
+      text.appendChild(
+        el('span', 'muted tiny', `${bytesLabel(c.sizeBytes)} \u00b7 saved ${new Date(c.modified).toLocaleString()}`),
+      );
+      text.appendChild(el('span', 'savepath', c.path));
+      item.appendChild(text);
+      const pick = el('button', `chip${c.active ? ' on' : ''}`, c.active ? 'In use' : 'Use this');
+      if (!c.active) activatable(pick, () => choose(c.path));
+      item.appendChild(pick);
+      return item;
+    };
+    for (const c of info.candidates ?? []) list.appendChild(row(c));
+    saveBody.appendChild(list);
+
+    const custom = el('div', 'saveadd');
+    const field = el('input', 'saveinput');
+    field.type = 'text';
+    field.placeholder = 'Paste the full path to a save file';
+    field.spellcheck = false;
+    if (info.chosenPath) field.value = info.chosenPath;
+    const go = el('button', 'chip', 'Load this file');
+    activatable(go, () => choose(field.value.trim()));
+    field.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') choose(field.value.trim());
+    });
+    custom.appendChild(field);
+    custom.appendChild(go);
+    saveBody.appendChild(custom);
+
+    if (info.following !== 'newest') {
+      const back = el('button', 'chip', 'Go back to the newest save');
+      activatable(back, () => choose(null));
+      saveBody.appendChild(back);
+    }
+    saveBody.appendChild(
+      el(
+        'p',
+        'muted tiny',
+        'A downloaded save is just a file on this machine \u2014 put it anywhere and point at it here. Companion opens local paths and nothing else.',
+      ),
+    );
+  };
+
+  const choose = (path) => {
+    saveBody.replaceChildren(el('p', 'muted tiny', 'Loading that save\u2026'));
+    fetch('/api/saves', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: path || null }),
+    })
+      .then((r) => r.json())
+      .then((info) => {
+        paintSaves(info);
+        if (!info.error) load();
+      })
+      .catch(() => paintSaves({ error: 'Could not reach Companion to change the save.' }));
+  };
+
+  fetch('/api/saves')
+    .then((r) => r.json())
+    .then(paintSaves)
+    .catch(() => paintSaves({ error: 'Could not reach Companion to read the save list.' }));
 
   const grid = el('div', 'setgrid');
   // Modes are not a list of switches: each one changes what the whole app is,

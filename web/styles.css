@@ -1425,6 +1425,14 @@ td.res.r-l { color: var(--down); }
 .streak.cold.spark { animation: frost 3.4s ease-in-out infinite; }
 .streak.cold.blaze { color: #38bdf8; animation: frost 2.2s ease-in-out infinite; }
 
+/*
+ * Playing well, but not on a run — worth marking, not worth animating. The
+ * table earned its flicker by meaning something rare; a squad list where a third
+ * of the rows twitch is just noise.
+ */
+.streak.good { color: var(--up); }
+.streak.good .ico { stroke-width: 2.1; }
+
 .streak.flat { color: var(--ink-faint); }
 .streak.flat.blaze { color: var(--ink-dim); animation: level 3.6s ease-in-out infinite; }
 
@@ -1495,6 +1503,32 @@ td.res.r-l { color: var(--down); }
 .legmark b { font-size: 11px; font-weight: 800; }
 .legtext { font-size: 11.5px; color: var(--ink-faint); }
 .unnamedchip { font-size: 10.5px; font-style: italic; color: var(--ink-faint); white-space: nowrap; }
+
+/* ============================================================ save file picker */
+
+.savebody { display: grid; gap: 10px; }
+.savelist { display: grid; gap: 6px; }
+.saverow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: var(--r-md);
+  background: var(--panel-2);
+}
+.saverow.on { border-color: var(--brand-line, var(--brand)); }
+.savetext { display: grid; gap: 1px; min-width: 0; flex: 1; }
+.savetext b { font-size: 13px; font-weight: 750; }
+/* The path is the identifying fact, but it is long: let it wrap rather than
+ * truncate, since a half-shown path tells you nothing about which file it is. */
+.savepath {
+  font-size: 10.5px; color: var(--ink-faint); word-break: break-all; line-height: 1.35;
+}
+.saveadd { display: flex; gap: 8px; flex-wrap: wrap; }
+.saveinput {
+  flex: 1; min-width: 220px;
+  padding: 7px 10px; border-radius: var(--r-md);
+  border: 1px solid var(--line-soft); background: var(--panel);
+  color: var(--ink); font-size: 12.5px; font-family: inherit;
+}
+.saveinput:focus { outline: none; border-color: var(--brand); }
 
 /* One line of the European round-up: home, score, away. */
 .euro {

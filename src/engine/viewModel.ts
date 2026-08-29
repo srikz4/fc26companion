@@ -110,6 +110,23 @@ export interface MatchRating {
   position: string;
 }
 
+/**
+ * A one-glance verdict on a player's recent football.
+ *
+ * `kind` says what happened, `line` says it in words, and `tone` decides how
+ * loud it looks. The role is carried too, because "outstanding" means something
+ * different for a centre-back than for a winger and should not wear the same
+ * badge.
+ */
+export interface PlayerMark {
+  kind: 'hattrick' | 'brace' | 'scoring' | 'imperious' | 'solid' | 'struggling';
+  role: 'keeper' | 'defender' | 'midfielder' | 'wide' | 'forward';
+  line: string;
+  tone: 'hot' | 'good' | 'cold';
+  /** 3+ is a run worth marking; 5+ is marked harder, as in the league table. */
+  depth: number;
+}
+
 export interface PlayerView {
   playerId: number;
   name: string;
@@ -190,6 +207,23 @@ export interface PlayerView {
   wageNote: string | null;
 
   /** Academy only. */
+  /**
+   * How they are actually playing, from the save's own match record.
+   *
+   * `ratings` are the match ratings the game gave them, oldest first, over the
+   * window the save keeps. `mark` is the one thing worth saying about that at a
+   * glance, and is null when there is nothing worth saying.
+   */
+  matchForm: {
+    ratings: number[];
+    /** Mean of the window, to one decimal. Null before they have played. */
+    average: number | null;
+    /** Goals in their last league match, and across the last three. */
+    goalsLastMatch: number | null;
+    goalsLastThree: number | null;
+    mark: PlayerMark | null;
+  };
+
   youth: {
     monthsInSquad: number | null;
     tier: number | null;
@@ -771,10 +805,41 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
 
   // Selection: the XI you saved versus the one the fit table would pick.
   const shapes = readFormations(rowsOf(tables, 'formations'));
+  /**
+   * Who is unavailable, and for how long.
+   *
+   * `teamplayerlinks.injury` reads zero for every player in every save measured,
+   * including one with a four-week injury showing in game, so it cannot be the
+   * source. `career_playerlastgrowth` is: it carries the day an injury started
+   * and how many days it runs, for the whole world.
+   *
+   * Those days are not on the same scale as any other date in the save, and
+   * nothing anchors them to a calendar. They do not need to be: injuries are
+   * being handed out somewhere in the world constantly, so the newest start date
+   * in the table IS the present, in the table's own units. An injury is live
+   * when it has not finished by then, and what is left is the difference.
+   * Measured against a save with one known injury, that gives 27 days where the
+   * game says four weeks.
+   */
+  const injuryEndsAt = new Map<number, number>();
+  let injuryToday = 0;
+  for (const g of rowsOf(tables, 'career_playerlastgrowth')) {
+    const start = num(g, 'injurydate') ?? 0;
+    if (start > injuryToday) injuryToday = start;
+  }
+  for (const g of rowsOf(tables, 'career_playerlastgrowth')) {
+    const pid = num(g, 'playerid');
+    const start = num(g, 'injurydate') ?? 0;
+    const days = num(g, 'injuryduration') ?? 0;
+    if (pid === null || days <= 0 || start <= 0) continue;
+    const ends = start + days;
+    if (ends >= injuryToday) injuryEndsAt.set(pid, ends);
+  }
+
   const availability = new Map<number, string>();
   for (const id of seniorIds) {
     const link = links.get(id);
-    if ((num(link, 'injury') ?? 0) !== 0) availability.set(id, 'injured');
+    if (injuryEndsAt.has(id) || (num(link, 'injury') ?? 0) !== 0) availability.set(id, 'injured');
     else if ((num(link, 'reds') ?? 0) > 0) availability.set(id, 'suspended');
   }
   const candidates = seniorRows
@@ -819,6 +884,94 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   const wages = buildWageReport(wageInputs);
 
   const ruleInputs = new Map<number, RuleInput>();
+
+  /**
+   * Match ratings per player, oldest first.
+   *
+   * `career_playermatchratinghistory` is a rolling window over the user's own
+   * squad — a handful of recent matches each, with the rating the game gave and
+   * the minutes played. It is the only per-match record of a player's football
+   * in the save, and unlike the season totals in `teamplayerlinks` it agrees
+   * with what the game shows.
+   */
+  const ratingsOf = new Map<number, number[]>();
+  {
+    const rows = rowsOf(tables, 'career_playermatchratinghistory')
+      .slice()
+      .sort((a, b) => (num(a, 'date') ?? 0) - (num(b, 'date') ?? 0));
+    for (const r of rows) {
+      const pid = num(r, 'playerid');
+      const rating = num(r, 'rating');
+      // A rating with no minutes behind it is an unused substitute, not a
+      // performance; counting those would drag every squad player's average
+      // toward the middle.
+      if (pid === null || rating === null || rating <= 0 || (num(r, 'minsplayed') ?? 0) <= 0) continue;
+      if (!ratingsOf.has(pid)) ratingsOf.set(pid, []);
+      ratingsOf.get(pid)!.push(rating);
+    }
+  }
+
+  const roleOf = (pos: string | null): PlayerMark['role'] => {
+    if (pos === 'GK') return 'keeper';
+    if (pos === null) return 'midfielder';
+    if (/^(RB|LB|CB|RWB|LWB)$/.test(pos)) return 'defender';
+    if (/^(RW|LW|RM|LM)$/.test(pos)) return 'wide';
+    if (/^(ST|CF)$/.test(pos)) return 'forward';
+    return 'midfielder';
+  };
+
+  /**
+   * What to say about a player's recent form, if anything.
+   *
+   * Goals come first because a hat-trick is the loudest thing a footballer can
+   * do in an afternoon. Below that it is ratings, and the wording follows the
+   * role — a centre-back who has not been beaten in three reads differently
+   * from a winger on a run, and saying "in form" for both would be saying
+   * nothing about either.
+   */
+  const MARK_WORDS: Record<PlayerMark['role'], { high: string; low: string }> = {
+    keeper: { high: 'unbeatable in goal', low: 'shaky in goal' },
+    defender: { high: 'a wall at the back', low: 'being got at' },
+    midfielder: { high: 'running the midfield', low: 'losing the midfield' },
+    wide: { high: 'unplayable out wide', low: 'quiet out wide' },
+    forward: { high: 'leading the line', low: 'not firing' },
+  };
+
+  const formOf = (id: number, pos: string | null): PlayerView['matchForm'] => {
+    const link = links.get(id);
+    const ratings = ratingsOf.get(id) ?? [];
+    const average = ratings.length ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10 : null;
+    const goalsLastMatch = link ? num(link, 'leaguegoalsprevmatch') : null;
+    const goalsLastThree = link ? num(link, 'leaguegoalsprevthreematches') : null;
+    const role = roleOf(pos);
+    const words = MARK_WORDS[role];
+
+    let mark: PlayerMark | null = null;
+    const last = ratings.slice(-5);
+    const runFrom = (ok: (r: number) => boolean): number => {
+      let n = 0;
+      for (let i = ratings.length - 1; i >= 0 && ok(ratings[i]!); i--) n++;
+      return n;
+    };
+
+    if ((goalsLastMatch ?? 0) >= 3) {
+      mark = { kind: 'hattrick', role, tone: 'hot', depth: goalsLastMatch!, line: `Hat-trick last time out — ${goalsLastMatch} goals.` };
+    } else if ((goalsLastMatch ?? 0) === 2) {
+      mark = { kind: 'brace', role, tone: 'hot', depth: 2, line: 'Two goals last time out.' };
+    } else if ((goalsLastThree ?? 0) >= 3) {
+      mark = { kind: 'scoring', role, tone: 'hot', depth: goalsLastThree!, line: `${goalsLastThree} goals in the last three.` };
+    } else {
+      const hot = runFrom((r) => r >= 8);
+      const cold = runFrom((r) => r <= 5);
+      if (hot >= 3) mark = { kind: 'imperious', role, tone: 'hot', depth: hot, line: `${words.high} — ${hot} matches at 8 or better.` };
+      else if (cold >= 3) mark = { kind: 'struggling', role, tone: 'cold', depth: cold, line: `${words.low} — ${cold} matches at 5 or worse.` };
+      else if (last.length >= 3 && average !== null && average >= 7.5) {
+        mark = { kind: 'solid', role, tone: 'good', depth: last.length, line: `${words.high}, averaging ${average}.` };
+      }
+    }
+
+    return { ratings, average, goalsLastMatch, goalsLastThree, mark };
+  };
 
   const build = (id: number, squad: 'senior' | 'academy'): PlayerView | null => {
     const player = players.get(id);
@@ -1070,6 +1223,8 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       contractMonths: months,
       wageVerdict: wageAssessment?.verdict ?? null,
       wageNote: wageAssessment?.note ?? null,
+
+      matchForm: formOf(id, positionShort(num(player, 'preferredposition1'))),
 
       youth: youth
         ? {
@@ -1770,12 +1925,10 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   };
 
   // --- treatment room: who is out and who steps in ----------------------------
+  // Days still to run, not the length of the injury: "out ~27 days" is what a
+  // manager needs, and "a 29-day injury" is not.
   const injuryDays = new Map<number, number>();
-  for (const g of rowsOf(tables, 'career_playerlastgrowth')) {
-    const pid = num(g, 'playerid');
-    const days = num(g, 'injuryduration');
-    if (pid !== null && days !== null && days > 0) injuryDays.set(pid, days);
-  }
+  for (const [pid, ends] of injuryEndsAt) injuryDays.set(pid, Math.max(0, ends - injuryToday));
   const standIn = (outId: number): { playerId: number; name: string; fit: number } | null => {
     const row = players.get(outId);
     const slot = row ? slotOf(num(row, 'preferredposition1')) : null;
