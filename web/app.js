@@ -4612,14 +4612,21 @@ function renderCentral(doc) {
     const streakCell = (r, kind, value) => {
       const cell = { text: value, num: true, sort: value, cls: r.isUser ? 'you' : undefined };
       const st = r.streak;
-      if (!st || st.kind !== kind || st.length < 3) return cell;
-      const [ico, tone] = STREAK_LOOK[kind];
-      const heat = st.length >= 5 ? 'blaze' : 'spark';
+      const marked = st && st.kind === kind && st.length >= 3;
+      // Every cell in these three columns carries the slot, marked or not, so
+      // the digits line up down the column. Hanging the mark off a marked cell
+      // alone shifted its number out of step with the nineteen below it.
       const wrap = el('span', 'streaknum');
+      const slot = el('span', 'streakslot');
+      if (marked) {
+        const [ico, tone] = STREAK_LOOK[kind];
+        const mark = el('span', `streak ${tone} ${st.length >= 5 ? 'blaze' : 'spark'}`);
+        mark.appendChild(icon(ico, 13));
+        slot.appendChild(mark);
+      }
+      wrap.appendChild(slot);
       wrap.appendChild(el('b', null, String(value)));
-      const mark = el('span', `streak ${tone} ${heat}`);
-      mark.appendChild(icon(ico, 13));
-      wrap.appendChild(mark);
+      if (!marked) return { ...cell, node: wrap };
       const word = kind === 'W' ? 'wins' : kind === 'D' ? 'draws' : 'defeats';
       return {
         ...cell,
@@ -4659,27 +4666,42 @@ function renderCentral(doc) {
         (lt.started ? lt.rows : [...lt.rows].sort((a, b) => (b.form ?? -1) - (a.form ?? -1))).map((r, i) => {
           const you = r.isUser ? 'you' : '';
           const rank = i + 1;
+          // Positive means climbed: they were lower-numbered before.
           const move = r.prevPosition !== null && r.prevPosition > 0 ? r.prevPosition - rank : null;
+          // Every club gets the same kind of number: places gained or lost
+          // since the last matchday. Promotion is not a movement — it is a
+          // fact about the club — so it rides beside the name instead of
+          // taking over this column and leaving one row reading "up" while
+          // nineteen read a figure.
           const moveCell =
-            r.movedDivision
-              ? {
-                  text: r.movedDivision === 'up' ? '▲ up' : '▼ down',
-                  cls: `${r.movedDivision === 'up' ? 'mv-up' : 'mv-down'}${you ? ' you' : ''}`,
-                  sort: r.movedDivision === 'up' ? '99' : '-99',
-                  title: r.movedDivision === 'up' ? 'Promoted this summer' : 'Relegated into this division',
-                }
-            : move === null
-              ? { text: '', cls: you || undefined }
+            move === null
+              ? { text: '·', cls: `mv-flat${you ? ' you' : ''}`, sort: '0', title: 'No previous round to compare with yet.' }
               : {
                   text: move > 0 ? `▲${move}` : move < 0 ? `▼${-move}` : '—',
                   cls: `${move > 0 ? 'mv-up' : move < 0 ? 'mv-down' : 'mv-flat'}${you ? ' you' : ''}`,
                   sort: String(move),
-                  title: `Finished ${ordinal(r.prevPosition)} last season`,
+                  title:
+                    move === 0
+                      ? `Held ${ordinal(rank)} through the last round.`
+                      : `${move > 0 ? 'Up' : 'Down'} ${Math.abs(move)} since the last round — ${ordinal(r.prevPosition)} to ${ordinal(rank)}.` +
+                        (r.lastSeasonPosition ? ` Finished ${ordinal(r.lastSeasonPosition)} last season.` : ''),
                 };
-          const nameCell =
-            r.name === null
-              ? { text: 'not yet named', cls: 'unnamed', sort: '￿', title: UNNAMED_WHY }
-              : { text: r.name, cls: you || undefined };
+          const nameCell = (() => {
+            if (r.name === null) return { text: 'not yet named', cls: 'unnamed', sort: '￿', title: UNNAMED_WHY };
+            if (!r.movedDivision) return { text: r.name, cls: you || undefined };
+            const wrap = el('span', 'clubcell');
+            wrap.appendChild(el('span', null, r.name));
+            wrap.appendChild(
+              el('i', `divtag ${r.movedDivision === 'up' ? 'promoted' : 'relegated'}`, r.movedDivision === 'up' ? 'P' : 'R'),
+            );
+            return {
+              node: wrap,
+              text: r.name,
+              sort: r.name,
+              cls: you || undefined,
+              title: r.movedDivision === 'up' ? `${r.name} came up this summer.` : `${r.name} came down into this division.`,
+            };
+          })();
           return lt.started
             ? [
                 { text: rank, num: true, cls: you || undefined },
@@ -4708,12 +4730,68 @@ function renderCentral(doc) {
     );
     grid.classList.add('ltable');
     box.appendChild(grid);
+
+    /**
+     * What every mark in the table means.
+     *
+     * Listed in full whether or not the table happens to show one today. A
+     * legend that appears and disappears with the thing it explains is no use:
+     * the moment you meet a symbol for the first time is exactly the moment its
+     * explanation has gone missing.
+     */
+    const legend = el('div', 'legend');
+    const legendItem = (build, label) => {
+      const item = el('span', 'legitem');
+      const mark = el('span', 'legmark');
+      build(mark);
+      item.appendChild(mark);
+      item.appendChild(el('span', 'legtext', label));
+      legend.appendChild(item);
+    };
+    const streakLegend = (kind, heat, label) => {
+      const [ico, tone] = STREAK_LOOK[kind];
+      legendItem((m) => {
+        const mark = el('span', `streak ${tone} ${heat}`);
+        mark.appendChild(icon(ico, 13));
+        m.appendChild(mark);
+      }, label);
+    };
+
+    legendItem((m) => m.appendChild(el('b', 'mv-up', '▲3')), 'places gained since the last round');
+    legendItem((m) => m.appendChild(el('b', 'mv-down', '▼3')), 'places lost');
+    legendItem((m) => m.appendChild(el('b', 'mv-flat', '—')), 'unmoved');
+    legendItem((m) => m.appendChild(el('i', 'divtag promoted', 'P')), 'promoted this summer');
+    legendItem((m) => m.appendChild(el('i', 'divtag relegated', 'R')), 'relegated into this division');
+    streakLegend('W', 'spark', 'three wins running');
+    streakLegend('W', 'blaze', 'five or more — on fire');
+    streakLegend('L', 'spark', 'three defeats running');
+    streakLegend('L', 'blaze', 'five or more — frozen');
+    streakLegend('D', 'spark', 'three draws running');
+    streakLegend('D', 'blaze', 'five or more — going nowhere');
+    legendItem((m) => {
+      const run = el('span', 'formrun');
+      for (const [res, cls] of [['W', 'f-w newest'], ['D', 'f-d'], ['L', 'f-l']]) {
+        run.appendChild(el('i', `fpip ${cls}`, res));
+      }
+      m.appendChild(run);
+    }, 'last five, most recent first');
+    legendItem((m) => {
+      const cell = el('span', 'formcell');
+      const track = el('div', 'btrack');
+      const fill = el('div', 'bfill t3');
+      fill.style.width = '70%';
+      track.appendChild(fill);
+      cell.appendChild(track);
+      m.appendChild(cell);
+    }, 'points from those five, out of fifteen');
+    legendItem((m) => m.appendChild(el('span', 'unnamedchip', 'not yet named')), 'no save has proved whose slot this is');
+    box.appendChild(legend);
     box.appendChild(
       el('p', 'muted tiny', !lt.started
         ? 'No league match has been played yet this season, so there is nothing to add up.'
         : fromLedger
-          ? `Added up from every result the save has recorded${lt.named < lt.total ? `. ${lt.total - lt.named} of ${lt.total} clubs are still unnamed \u2014 the save files fixtures by slot, and names a slot only when a results round-up covers one of its matches` : ''}. Arrows compare today\u2019s order with where each club finished last season.`
-          : 'Taken from the club records in the save. Arrows compare today\u2019s order with where each club finished last season.'),
+          ? `Added up from every result the save has recorded${lt.named < lt.total ? `. ${lt.total - lt.named} of ${lt.total} clubs are still unnamed \u2014 the save files fixtures by slot, and a slot is named only once a save proves whose it is` : ''}.`
+          : 'Taken from the club records in the save, which for your own division are usually last season\u2019s.'),
     );
     panel(colMain, lt.league ?? 'League table', box);
   }

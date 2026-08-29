@@ -36,6 +36,7 @@ import {
   buildStandings,
   compForLeague,
   fixturesForSlot,
+  lastRoundStart,
   type SlotAnchor,
 } from './standings.ts';
 import { MODEL, allFits, bestFit, calibrationReport, fitFor, slotOf, type Slot } from './fit.ts';
@@ -285,8 +286,14 @@ export interface ViewDocument {
       teamId: number | null;
       name: string | null;
       position: number | null;
+      /**
+       * Where they stood before the latest round, so the arrow means "since you
+       * last played" rather than "since last May". Null on the opening day.
+       */
       prevPosition: number | null;
       movedDivision: 'up' | 'down' | null;
+      /** Where they finished last season, when that is comparable. */
+      lastSeasonPosition: number | null;
       form: number | null;
       formLong: number | null;
       form5: ('W' | 'D' | 'L')[];
@@ -1585,6 +1592,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         position: num(l, 'currenttableposition'),
         /** Where they finished last season — the movement arrow's other end. */
         prevPosition: moved ? null : num(l, 'previousyeartableposition'),
+        lastSeasonPosition: moved ? null : num(l, 'previousyeartableposition'),
         /** 'up' or 'down' when the club changed division over the summer. */
         movedDivision: (moved ? ((prevLeague ?? 0) > (league ?? 0) ? 'up' : 'down') : null) as 'up' | 'down' | null,
         /** The game's own 0-100 recent-form number, which IS maintained live. */
@@ -1655,6 +1663,22 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       ledger.anchors.find((a) => a.comp === comp && a.slot === slot)?.teamId ?? null;
     if (comp !== null) {
       const table = buildStandings(ledger.fixtures, comp, nameSlot);
+      /**
+       * The same table as it stood before the latest round.
+       *
+       * A club promoted in the summer has no position in this division last
+       * season, so comparing against that left it with "up" where every other
+       * club had a number. Comparing against the previous matchday gives every
+       * club the same kind of answer, and is the more useful one week to week.
+       */
+      const roundStart = lastRoundStart(ledger.fixtures, comp);
+      const prevPositionOf = new Map<number, number>();
+      if (roundStart !== null) {
+        const earlier = buildStandings(ledger.fixtures, comp, nameSlot, { before: roundStart });
+        if (earlier.some((r) => r.played > 0)) {
+          for (const r of earlier) prevPositionOf.set(r.slot, r.position);
+        }
+      }
       if (table.length) {
         ledgerRows = table.map((r) => {
           const link = r.teamId === null ? undefined : linkOf.get(r.teamId);
@@ -1665,7 +1689,8 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
             teamId: r.teamId,
             name: r.teamId === null ? null : (teamNames.get(r.teamId) ?? `team ${r.teamId}`),
             position: r.position,
-            prevPosition: moved || !link ? null : num(link, 'previousyeartableposition'),
+            prevPosition: prevPositionOf.get(r.slot) ?? null,
+            lastSeasonPosition: moved || !link ? null : num(link, 'previousyeartableposition'),
             movedDivision: (moved ? ((prevLeague ?? 0) > (thisLeague ?? 0) ? 'up' : 'down') : null) as
               | 'up'
               | 'down'

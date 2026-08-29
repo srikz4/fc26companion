@@ -7,6 +7,7 @@ import {
   compForLeague,
   competitionSlots,
   fixturesForSlot,
+  lastRoundStart,
 } from '../src/engine/standings.ts';
 
 const fx = (
@@ -81,6 +82,63 @@ describe('buildStandings', () => {
     assert.deepEqual(
       buildStandings(withPlaceholder, 808).map((r) => r.slot).sort((a, b) => a - b),
       [1, 2, 3, 4],
+    );
+  });
+});
+
+describe('lastRoundStart', () => {
+  it('treats a weekend spread over three days as one round', () => {
+    const season = [fx(20270911, 1, 2, 2, 0), fx(20270912, 3, 1, 4, 1), fx(20270904, 1, 0, 3, 0)];
+    assert.equal(lastRoundStart(season, 808), 20270911);
+  });
+
+  it('holds a round together across the turn of a month', () => {
+    const season = [fx(20270831, 1, 1, 2, 0), fx(20270902, 3, 1, 4, 1), fx(20270820, 1, 0, 3, 0)];
+    assert.equal(lastRoundStart(season, 808), 20270831);
+  });
+
+  it('ignores fixtures that have not been played', () => {
+    assert.equal(lastRoundStart([fx(20270911, 1, 2, 2, 0), fx(20271225, 3, null, 4, null)], 808), 20270911);
+    assert.equal(lastRoundStart([fx(20271225, 3, null, 4, null)], 808), null);
+  });
+});
+
+describe('buildStandings before a date', () => {
+  const season = [
+    fx(20270814, 1, 3, 2, 0),
+    fx(20270814, 3, 0, 4, 0),
+    fx(20270911, 2, 4, 1, 0),
+    fx(20270912, 4, 1, 3, 0),
+  ];
+
+  it('rebuilds the table as it stood before the latest round', () => {
+    const start = lastRoundStart(season, 808)!;
+    assert.equal(start, 20270911);
+    const earlier = buildStandings(season, 808, () => null, { before: start });
+    assert.deepEqual(
+      earlier.map((r) => [r.slot, r.played, r.points]),
+      [
+        [1, 1, 3],
+        [3, 1, 1],
+        [4, 1, 1],
+        [2, 1, 0],
+      ],
+    );
+    // Everyone keeps a row, so a movement can be worked out for every club.
+    assert.equal(earlier.length, 4);
+  });
+
+  it('leaves the full table untouched', () => {
+    // Slot 4 wins then draws for four points; 2 and 1 share three and split on
+    // goal difference; 3 has the single point.
+    assert.deepEqual(
+      buildStandings(season, 808).map((r) => [r.slot, r.played, r.points]),
+      [
+        [4, 2, 4],
+        [2, 2, 3],
+        [1, 2, 3],
+        [3, 2, 1],
+      ],
     );
   });
 });

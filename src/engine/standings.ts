@@ -222,6 +222,49 @@ export function compForLeague(anchors: SlotAnchor[], leagueOfTeam: (id: number) 
 }
 
 /**
+ * When the most recent round began.
+ *
+ * A round is not a day — a Premier League weekend runs Saturday to Monday — so
+ * "the last matchday" is the cluster of fixtures around the latest one played,
+ * not the latest date on its own. Returns null before a ball has been kicked.
+ */
+export function lastRoundStart(fixtures: SlotFixture[], comp: number, spanDays = 4): number | null {
+  const dates = fixtures.filter((f) => f.comp === comp && played(f)).map((f) => f.date);
+  if (!dates.length) return null;
+  const latest = Math.max(...dates);
+  // Dates are YYYYMMDD, so a numeric window is only right inside one month;
+  // stepping back day by day handles the turn of a month without a date library.
+  let start = latest;
+  for (const d of dates) {
+    if (d > latest || d < start) {
+      const gap = daysBetween(d, latest);
+      if (gap !== null && gap <= spanDays) start = d;
+    }
+  }
+  return start;
+}
+
+/** Whole days between two YYYYMMDD stamps, or null if they are far apart. */
+function daysBetween(from: number, to: number): number | null {
+  const asUtc = (v: number): number =>
+    Date.UTC(Math.floor(v / 10000), Math.floor((v % 10000) / 100) - 1, v % 100);
+  const diff = (asUtc(to) - asUtc(from)) / 86_400_000;
+  return Number.isFinite(diff) ? diff : null;
+}
+
+export interface StandingsOptions {
+  /**
+   * Ignore anything played on or after this date.
+   *
+   * Used to rebuild the table as it stood before the latest round, which is
+   * what makes a movement arrow mean "since you last played" — a number every
+   * club has, including one just promoted, which has no position last season to
+   * be compared with.
+   */
+  before?: number;
+}
+
+/**
  * The table for one competition group.
  *
  * Sorted the way football sorts: points, then goal difference, then goals
@@ -232,6 +275,7 @@ export function buildStandings(
   fixtures: SlotFixture[],
   comp: number,
   nameSlot: (slot: number) => number | null = () => null,
+  opts: StandingsOptions = {},
 ): Standing[] {
   const rows = new Map<number, Standing>();
   const row = (slot: number): Standing => {
@@ -262,7 +306,11 @@ export function buildStandings(
   // Every entrant gets a row, even one whose season has not started.
   for (const slot of entrants) row(slot);
 
-  for (const f of inComp.filter(played).sort((a, b) => a.date - b.date)) {
+  const counts = inComp
+    .filter(played)
+    .filter((f) => opts.before === undefined || f.date < opts.before)
+    .sort((a, b) => a.date - b.date);
+  for (const f of counts) {
     for (const [slot, gf, ga] of [
       [f.slotA, f.goalsA!, f.goalsB!],
       [f.slotB, f.goalsB!, f.goalsA!],

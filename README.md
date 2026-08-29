@@ -18,9 +18,10 @@ Customise — and adds what the game keeps to itself:
   it moves, up or down.
 - **A live league table and your full fixture list**, added up from the save's own record of every
   match played — played, won, drawn, lost, goals, points, form, the last five results newest first,
-  and every remaining fixture with its date and kick-off. A club three deep in wins is marked, and
-  five deep is marked harder; the same for defeats and for draws. Plus the matchday round-up from
-  the rest of Europe.
+  places gained or lost since the last round, and every remaining fixture with its date and
+  kick-off. A club three deep in wins is marked against its win column, and five deep is marked
+  harder; the same for defeats and for draws. A key under the table names every mark, whether or
+  not today's table shows one. Plus the matchday round-up from the rest of Europe.
 - **Treatment room** with recovery times and computed stand-ins, transfer windows, and the world's
   transfer feed.
 - **Valuations**: an EA-style fair value with a walk-away floor and a negotiation ceiling, plus what

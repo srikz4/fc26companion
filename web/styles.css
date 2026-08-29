@@ -1359,11 +1359,19 @@ td.res.r-l { color: var(--down); }
  * on screen rather than behind a horizontal scroll.
  */
 .ltable table.tight td,
-.ltable table.tight th { padding-left: 5px; padding-right: 5px; }
-.ltable .formcell { min-width: 56px; grid-template-columns: minmax(24px, 1fr) 1.8em; gap: 5px; }
+.ltable table.tight th { padding-left: 4px; padding-right: 4px; }
+.ltable .formcell { min-width: 48px; grid-template-columns: minmax(20px, 1fr) 1.7em; gap: 4px; }
 .ltable .formcell b { font-size: 11px; }
 .ltable .formrun { gap: 2px; }
 .ltable .fpip { width: 15px; height: 15px; border-radius: 3px; font-size: 9px; }
+/*
+ * The club name is the one elastic column, so it is the one that gives way.
+ * Capping it is what buys the room for the streak slots; a long name ellipses
+ * rather than pushing the form off the edge, and the full name is in the cell's
+ * own tooltip either way.
+ */
+.ltable td:nth-child(3), .ltable th:nth-child(3) { max-width: 150px; }
+.ltable td:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /*
  * A run of results, marked against the number it is made of.
@@ -1373,21 +1381,120 @@ td.res.r-l { color: var(--down); }
  * sits beside the figure rather than replacing it — the count is still the
  * fact, this is only the emphasis.
  */
-.streaknum { display: inline-flex; align-items: center; gap: 4px; justify-content: flex-end; }
+/*
+ * Every W, D and L cell keeps a slot for its mark, whether or not it has one.
+ *
+ * Putting the mark beside the figure only when there was a mark pushed that
+ * number out of step with the nineteen below it, and a column of numbers that
+ * will not line up is worse than no mark at all. The slot is always there, so
+ * the digits sit where they always sat and the mark appears alongside.
+ */
+.streaknum {
+  display: grid; grid-template-columns: 13px auto; gap: 2px;
+  align-items: center; justify-content: end;
+}
 .streaknum b { font-variant-numeric: tabular-nums; font-weight: 700; }
-.streak { display: inline-flex; line-height: 0; }
+.streakslot {
+  width: 13px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.streak { display: inline-flex; line-height: 0; pointer-events: none; }
 .streak .ico { width: 13px; height: 13px; }
-.streak.spark { opacity: 0.62; }
-.streak.spark .ico { stroke-width: 1.9; }
-.streak.blaze .ico { stroke-width: 2.4; }
+.streak.spark .ico { width: 12px; height: 12px; stroke-width: 2; }
+.streak.blaze .ico { width: 15px; height: 15px; stroke-width: 2.3; }
+
+/*
+ * Heat and cold should read as heat and cold.
+ *
+ * The flame was a thin amber outline: correct in colour, inert in feel, and
+ * next to a crisp snowflake it looked like the lesser of the two when it means
+ * the better thing. It is filled now, and it burns — the flicker is uneven on
+ * purpose, because a steady pulse reads as a notification badge. The frost
+ * breathes instead: slower, wider, colder.
+ */
 .streak.hot { color: #f59e0b; }
-.streak.hot.blaze { color: #f97316; filter: drop-shadow(0 0 4px rgb(249 115 22 / 0.55)); }
-.streak.cold { color: #60a5fa; }
-.streak.cold.blaze { color: #38bdf8; filter: drop-shadow(0 0 4px rgb(56 189 248 / 0.55)); }
+.streak.hot .ico { fill: currentColor; fill-opacity: 0.28; transform-origin: 50% 85%; }
+.streak.hot.spark { animation: ember 2.4s ease-in-out infinite; }
+.streak.hot.blaze {
+  color: #fb923c;
+  animation: ember 1.15s ease-in-out infinite;
+}
+.streak.hot.blaze .ico { fill-opacity: 0.5; }
+
+.streak.cold { color: #7dd3fc; }
+.streak.cold.spark { animation: frost 3.4s ease-in-out infinite; }
+.streak.cold.blaze { color: #38bdf8; animation: frost 2.2s ease-in-out infinite; }
+
 .streak.flat { color: var(--ink-faint); }
-.streak.flat.blaze { color: var(--ink-dim); }
-:root[data-theme='light'] .streak.hot { color: #b45309; }
-:root[data-theme='light'] .streak.cold { color: #1d4ed8; }
+.streak.flat.blaze { color: var(--ink-dim); animation: level 3.6s ease-in-out infinite; }
+
+@keyframes ember {
+  0%   { filter: drop-shadow(0 0 2px rgb(249 115 22 / 0.5)); scale: 1 1; }
+  18%  { filter: drop-shadow(0 0 6px rgb(249 115 22 / 0.85)); scale: 1.04 1.1; }
+  34%  { filter: drop-shadow(0 0 3px rgb(249 115 22 / 0.55)); scale: 0.98 0.96; }
+  55%  { filter: drop-shadow(0 0 7px rgb(251 146 60 / 0.9)); scale: 1.05 1.12; }
+  72%  { filter: drop-shadow(0 0 3px rgb(249 115 22 / 0.6)); scale: 1 1.02; }
+  100% { filter: drop-shadow(0 0 2px rgb(249 115 22 / 0.5)); scale: 1 1; }
+}
+@keyframes frost {
+  0%   { filter: drop-shadow(0 0 2px rgb(125 211 252 / 0.45)); rotate: 0deg; opacity: 0.85; }
+  50%  { filter: drop-shadow(0 0 8px rgb(56 189 248 / 0.8)); rotate: 30deg; opacity: 1; }
+  100% { filter: drop-shadow(0 0 2px rgb(125 211 252 / 0.45)); rotate: 60deg; opacity: 0.85; }
+}
+@keyframes level {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 0.95; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .streak.hot.spark, .streak.hot.blaze,
+  .streak.cold.spark, .streak.cold.blaze,
+  .streak.flat.blaze { animation: none; }
+  .streak.hot.blaze { filter: drop-shadow(0 0 5px rgb(249 115 22 / 0.75)); }
+  .streak.cold.blaze { filter: drop-shadow(0 0 5px rgb(56 189 248 / 0.7)); }
+}
+
+:root[data-theme='light'] .streak.hot { color: #c2410c; }
+:root[data-theme='light'] .streak.cold { color: #0369a1; }
+:root[data-theme='light'] .streak.cold.blaze { color: #0284c7; }
+
+/*
+ * Promoted or relegated: a fact about the club, so it sits with the name.
+ *
+ * When the column runs out of room the NAME gives way, never the tag — a
+ * half-clipped badge is a smudge, whereas a shortened name is still legible and
+ * the cell's tooltip carries it in full.
+ */
+.clubcell { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.clubcell > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.divtag {
+  flex: none; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+  width: 15px; height: 15px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.divtag.promoted { color: var(--up); background: color-mix(in srgb, var(--up) 18%, transparent); }
+.divtag.relegated { color: var(--down); background: color-mix(in srgb, var(--down) 18%, transparent); }
+
+/*
+ * The key to the table, always complete.
+ *
+ * Every mark is listed whether or not today's table shows one, because the
+ * first time you meet a symbol is exactly when its explanation must be there.
+ */
+.legend {
+  display: flex; flex-wrap: wrap; gap: 5px 14px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft);
+}
+.legitem { display: inline-flex; align-items: center; gap: 6px; }
+.legmark {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; min-height: 16px;
+}
+.legmark .streak { position: static; translate: none; }
+.legmark .formcell { min-width: 40px; grid-template-columns: 1fr; }
+.legmark .fpip { width: 14px; height: 14px; font-size: 8.5px; border-radius: 3px; }
+.legmark b { font-size: 11px; font-weight: 800; }
+.legtext { font-size: 11.5px; color: var(--ink-faint); }
+.unnamedchip { font-size: 10.5px; font-style: italic; color: var(--ink-faint); white-space: nowrap; }
 
 /* One line of the European round-up: home, score, away. */
 .euro {
