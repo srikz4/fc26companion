@@ -2719,28 +2719,54 @@ function renderScouting(doc) {
   {
     const notes = el('div', 'panel');
     const reports = doc.academyReports ?? [];
-    notes.appendChild(el('h2', null, `📬 Report prospects — ${reports.length}`));
+    notes.appendChild(el('h2', null, `Report prospects — ${reports.length}`));
     if (reports.length) {
+      const byVerdict = (v) => reports.filter((r) => r.report.verdict === v);
       notes.appendChild(
-        el('p', 'muted', 'Prospects a scout has delivered into your academy but you have not signed: the report puts them in the squad list, and signing is what writes the contract. Each carries a verdict weighed against the academy you already have and the positions that are thin.'),
+        tileRow([
+          ['Delivered', reports.length],
+          ['Sign', byVerdict('sign').length || null, 'Ceiling worth a place in your academy.', byVerdict('sign').length ? 'good' : ''],
+          ['Watch', byVerdict('watch').length || null],
+          ['Pass', byVerdict('pass').length || null],
+          ['Best ceiling', Math.max(0, ...reports.map((r) => r.potential ?? 0)) || null],
+        ]),
+      );
+      notes.appendChild(
+        el('p', 'muted', 'A scout has delivered these into your academy; signing them in game is what gives them a contract. Until then they sit here, and Companion tells them apart from your own prospects by exactly that.'),
       );
       notes.appendChild(
         table(
-          ['Prospect', { label: 'Pos', pos: true }, 'From', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Ceiling', num: true }, { label: '±', num: true }, 'Verdict', 'Why'],
+          [{ label: 'Pos', pos: true }, 'Prospect', 'From', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, 'Verdict', 'Why'],
           reports.map((r) => [
-            r.name,
-            { text: r.pos ?? '—', cls: 'posbadge' },
+            { text: r.positionShort ?? '—', cls: 'posbadge' },
+            { node: playerNameCell(r), text: r.name, sort: r.name },
             `${flagFor(r.nation)}${r.nation ?? '—'}`,
             { text: r.age ?? '—', num: true },
             { text: r.overall ?? '—', num: true, tier: r.overall },
             { text: r.potential ?? '—', num: true, tier: r.potential },
-            { text: r.potentialVariance ?? '—', num: true, title: 'Potential variance from the scout report — bigger means the ceiling is less certain' },
-            { text: r.verdict.toUpperCase(), cls: r.verdict === 'sign' ? 'v-sign' : r.verdict === 'pass' ? 'v-pass' : 'v-watch' },
-            { text: r.why, cls: 'wrap' },
+            {
+              node: el('span', `verdictpill v-${r.report.verdict}`, r.report.verdict.toUpperCase()),
+              text: r.report.verdict,
+              sort: r.report.verdict === 'sign' ? 2 : r.report.verdict === 'watch' ? 1 : 0,
+            },
+            { text: r.report.why, cls: 'wrap' },
           ]),
+          {
+            keys: reports.map((r) => r.playerId),
+            openKey: state.reportSel,
+            detail: (key) => {
+              const sel = reports.find((r) => r.playerId === Number(key));
+              return sel ? playerCard(sel, () => { state.reportSel = null; render(); }, 'attributes') : null;
+            },
+            onRow: (key) => {
+              const id = Number(key);
+              state.reportSel = state.reportSel === id ? null : id;
+              render();
+            },
+          },
         ),
       );
-      notes.appendChild(el('p', 'muted tiny', 'Sign or release them in game; this list follows the save. Signed prospects move to My Academy with tier and months tracked.'));
+      notes.appendChild(el('p', 'muted tiny', 'Open a row for the full attribute sheet. Sign or release in game and this list follows on the next save.'));
     } else {
       const away = (doc.scouts ?? []).filter((sc) => sc.away);
       const when = away
@@ -5343,6 +5369,14 @@ function render() {
   }
 
   $('#club').textContent = [doc.club.name, doc.manager].filter(Boolean).join(' · ') || '—';
+  // Companion only ever sees what the game has written. If the screen looks
+  // behind the game, the save is behind the game.
+  const synced = $('#synced');
+  if (synced) {
+    synced.dataset.tip =
+      'Companion reads the save file, so it can only be as current as your last save. ' +
+      'If something on screen looks out of date, save in game (or advance a day) and it updates within a few seconds.';
+  }
   $('#game-date').textContent = `~${fmtDate(doc.gameDate)}`;
   $('#game-date').title = `Estimated from ${doc.gameDateBasis || 'nothing'} — the save has no live date field`;
 

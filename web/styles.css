@@ -1801,3 +1801,67 @@ main > .panel + .panel { margin-top: 14px; }
   border-left: 2px solid var(--rpg); color: var(--ink-dim);
   font-size: 13px; line-height: 1.5;
 }
+
+/* ============================================================ report verdicts */
+.verdictpill {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.06em;
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.verdictpill.v-sign { color: var(--up); background: var(--t3-bg); border-color: color-mix(in srgb, var(--up) 32%, transparent); }
+.verdictpill.v-watch { color: var(--ink-dim); background: var(--panel-2); border-color: var(--line); }
+.verdictpill.v-pass { color: var(--down); background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.28); }
+
+/* ============================================================ the phone nav
+
+   Seven tabs wrapped to a second line on a 375px screen, which pushed every
+   view down. They scroll sideways instead, the way the sub-nav already does. */
+@media (max-width: 700px) {
+  .views {
+    display: flex; flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .views::-webkit-scrollbar { display: none; }
+  .views .tab { flex: none; padding: 8px 10px; font-size: 12px; }
+  .central { gap: 10px; }
+  main { padding-left: 10px; padding-right: 10px; }
+}
+
+/* ============================================================ grid overflow guard
+
+   A grid item defaults to `min-width: auto`, so its widest unbreakable child
+   sets the track width and the whole column blows past the viewport. Every
+   grid child in the app is allowed to shrink instead; the content that cannot
+   shrink (a wide table) scrolls inside its own wrapper, which is what
+   `.table-wrap` is for. */
+.central > *, .central-main > *, .central-side > *,
+.grid > *, .setgrid > *, .campcols > *, .campright > * { min-width: 0; }
+.panel { min-width: 0; }
+
+@media (max-width: 700px) {
+  /* Nothing in a header row is worth a horizontal scrollbar. */
+  .datebar, .hero-line, .facts, .chiprow, .tiles { flex-wrap: wrap; }
+  .dateday { font-size: 21px; }
+  .wchip { font-size: 10px; padding: 2px 8px; }
+  .panel h2 { flex-wrap: wrap; }
+}
+
+/* The pitch: its two-column rule lives later in this sheet than the phone
+   override that was meant to flatten it, so the override never won. Repeated
+   here, last, where the cascade is on its side. */
+@media (max-width: 700px) {
+  /* `minmax(0, 1fr)`, not `1fr`: a plain 1fr track still sizes to its widest
+     min-content, which the pitch's position cards were setting. */
+  .pitch-wrap { grid-template-columns: minmax(0, 1fr) !important; }
+  .pitch-wrap > * { min-width: 0; }
+  .pitch { max-width: 100%; }
+  .slot .pc { max-width: 44vw; }
+  .pc .prow { flex-wrap: wrap; }
+}
+
+/* The story card is 1080 wide by design; on a phone it scales to fit. */
+.storycard svg, .storycols svg, #main svg { max-width: 100%; height: auto; }
+
+.storycols > *, .linkgrid > *, .devgrid > *, .wagegrid > *, .loangrid > *,
+.gapgrid > *, .compgrid > *, .depthgrid > *, .queststrip > * { min-width: 0; }
+@media (max-width: 900px) { .storycols { grid-template-columns: minmax(0, 1fr); } }

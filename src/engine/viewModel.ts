@@ -364,23 +364,11 @@ export interface ViewDocument {
     }[];
   };
   /**
-   * Scout-report prospects: in career_youthplayers but with no squad link and
-   * no contract — the game wrote the report to disk before you signed anyone.
+   * Prospects a scout has delivered into the academy that you have not signed.
+   * Full player records — they deserve the same reading as anyone else — plus
+   * the call on whether to sign them.
    */
-  academyReports: {
-    playerId: number;
-    name: string;
-    age: number | null;
-    pos: string | null;
-    overall: number | null;
-    potential: number | null;
-    potentialVariance: number | null;
-    tier: number | null;
-    monthsListed: number | null;
-    nation: string | null;
-    verdict: 'sign' | 'watch' | 'pass';
-    why: string;
-  }[];
+  academyReports: (PlayerView & { report: { verdict: 'sign' | 'watch' | 'pass'; why: string } })[];
   /**
    * Descriptive profiles for players outside your squad — everyone on the
    * shopping list and everyone the game has shortlisted. Enough to open a real
@@ -662,10 +650,20 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         ];
 
   const seniorIds = squadOf(clubId);
-  // Academy is the academy squad, nothing else. A youth-table row for someone who
-  // has moved to another club is not our prospect, and a row with no `players`
-  // record is not a player at all (spec.md §2.5a).
-  const academyIds = squadOf(YOUTH_TEAM_ID);
+  // The academy squad holds two different things, and the difference is the
+  // contract (verified 2026-08-29, three reports delivered: 31 youth links =
+  // 13 signed prospects, each with a contract and a career_youthplayers row,
+  // and 18 report arrivals with neither, wearing jersey 99).
+  //
+  //   signed  — has a contract: he is yours, and the youth table tracks him
+  //   report  — no contract: a scout delivered him, and signing is the act
+  //             that writes the contract
+  //
+  // Treating them as one list put eighteen strangers in the academy and left
+  // Scout Reports empty.
+  const academySquadIds = squadOf(YOUTH_TEAM_ID);
+  const academyIds = academySquadIds.filter((id) => contracts.has(id));
+  const reportIds = academySquadIds.filter((id) => !contracts.has(id));
 
 
   const nameOf = (id: number): string => resolver.resolve(id).display;
@@ -1816,50 +1814,32 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     ? academyPotentials[Math.floor(academyPotentials.length / 2)]!
     : null;
   const thinSlotSet = new Set(transfers.gaps.filter((g) => g.severity !== 'none').map((g) => g.slot));
-  const academyReports = rowsOf(tables, 'career_youthplayers')
-    .filter((y) => {
-      const pid = num(y, 'playerid');
-      return pid !== null && academyIds.includes(pid) && !contracts.has(pid) && players.has(pid);
-    })
-    .map((y) => {
-      const pid = num(y, 'playerid')!;
-      const row = players.get(pid)!;
-      const pot = num(row, 'potential');
-      const ovr = num(row, 'overallrating');
-      const age = ageAt(num(row, 'birthdate'), gameDate.date);
-      const slot = slotOf(num(row, 'preferredposition1'));
-      const variance = num(y, 'potentialvariance');
-      const thin = slot !== null && thinSlotSet.has(slot);
+  const academyReports = reportIds
+    .map((pid) => {
+      const view = build(pid, 'academy');
+      if (!view) return null;
+      const pot = view.potential;
+      const slot = view.positionShort;
+      const thin = slot !== null && thinSlotSet.has(slot as never);
       const aboveAcademy = pot !== null && academyMedianPot !== null && pot >= academyMedianPot;
       let verdict: 'sign' | 'watch' | 'pass';
       let why: string;
       if (pot !== null && (pot >= 84 || (aboveAcademy && thin))) {
         verdict = 'sign';
-        why = pot >= 84
-          ? `A ${pot} ceiling is first-team material — sign before the report expires.`
-          : `Ceiling ${pot} beats your academy median (${academyMedianPot}) and ${slot} is thin.`;
+        why =
+          pot >= 84
+            ? `A ${pot} ceiling is first-team material — sign him before the report lapses.`
+            : `Ceiling ${pot} beats your academy median of ${academyMedianPot}, and ${slot} is thin.`;
       } else if (pot !== null && academyMedianPot !== null && pot < academyMedianPot - 4 && !thin) {
         verdict = 'pass';
-        why = `Ceiling ${pot} sits under everything already in the academy (median ${academyMedianPot}) at a position you cover.`;
+        why = `Ceiling ${pot} sits under everything already in the academy (median ${academyMedianPot}) at a position you already cover.`;
       } else {
         verdict = 'watch';
-        why = `${pot ?? '?'} ceiling${variance ? ` with ±${variance} variance` : ''} — worth a signing only if the intake stays thin this cycle.`;
+        why = `${pot ?? 'An unknown'} ceiling — worth a place only if this intake stays thin.`;
       }
-      return {
-        playerId: pid,
-        name: nameOf(pid),
-        age,
-        pos: positionShort(num(row, 'preferredposition1')),
-        overall: ovr,
-        potential: pot,
-        potentialVariance: variance,
-        tier: num(y, 'playertier'),
-        monthsListed: num(y, 'monthsinsquad'),
-        nation: nationName(num(row, 'nationality')),
-        verdict,
-        why,
-      };
+      return { ...view, report: { verdict, why } };
     })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0));
 
   // --- scout profiles for the shopping list and the game's own shortlist -----

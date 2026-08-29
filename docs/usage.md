@@ -3,6 +3,12 @@
 What each screen tells you and how to work it. One habit powers everything: **save in game** —
 every screen refreshes itself the moment you do.
 
+> **If something looks out of date, save in game.** Companion reads your save file; it cannot see
+> anything the game has not written yet. Signed a player, played a match, taken a scout report? The
+> screen catches up within a few seconds of the next save — advance a day or hit save manually. The
+> "synced" clock in the header tells you how long it has been.
+
+
 The navigation mirrors the game's own menu: **Central · Squad · Transfers · Academy · Office ·
 Story · Customise**, each with its own sub-tabs.
 
@@ -71,9 +77,11 @@ edge, and — with RPG mode on — the campaign.
 
 - **My Academy** — the prospects you have signed, in the same four views as the Squad Hub, so a
   16-year-old has a full attribute sheet like anyone else.
-- **Scout Reports** — your scouts, their missions and return dates, and any prospect a scout has
-  delivered into the academy that you have not signed yet, each with a **sign / watch / pass**
-  verdict weighed against the academy you already have and the positions that are thin.
+- **Scout Reports** — your scouts, their missions and return dates, and every prospect a scout has
+  delivered that you have not signed yet, each with a **sign / watch / pass** verdict weighed against
+  the academy you already have and the positions that are thin. Open a row for the full attribute
+  sheet. A delivered report sits in your academy squad without a contract, and signing him in game is
+  what writes one — that is exactly how Companion tells reports from your own prospects.
 
 ## Office
 

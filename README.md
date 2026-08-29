@@ -36,6 +36,9 @@ Customise — and adds what the game keeps to itself:
 Double-click **`Companion.vbs`**. It starts the server (minimised in the taskbar) and opens the
 page; phone addresses are printed in the server window. Save in game and the page updates itself.
 
+> Companion can only see what the game has written. **If a screen looks out of date, save in game**
+> — or advance a day — and it catches up within a few seconds.
+
 - New machine? See **[docs/install.md](docs/install.md)**.
 - What each screen means and how to play with it: **[docs/usage.md](docs/usage.md)**.
 

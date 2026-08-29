@@ -75,6 +75,9 @@ Delete the folder. Nothing is installed anywhere else — no registry entries, n
 
 - **Page says "Waiting for the first save"** — save your career in game once; the page updates
   itself.
+- **The screen looks behind the game** — Companion only sees what the game has written. Save in
+  game (or advance a day) and it catches up within a few seconds. The "synced" clock in the header
+  shows how long it has been since the last save it read.
 - **"Port 4126 is already in use"** — Companion is already running; the launcher will simply
   open the page next time.
 - **Phone can't connect** — same Wi-Fi? Launcher run without `--local`? Check the firewall

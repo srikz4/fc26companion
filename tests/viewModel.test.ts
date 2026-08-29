@@ -77,6 +77,9 @@ describe('academy selection', () => {
       { playerid: 460095, monthsinsquad: 1, playertier: 3, swinglowpotential: 21, potentialvariance: 7 },
       { playerid: 459968, monthsinsquad: 2, playertier: 2, swinglowpotential: -10, potentialvariance: 0 },
     ];
+    // A signed prospect has a contract; that is precisely what separates him
+    // from a prospect a scout has merely delivered.
+    tables['career_playercontract'] = [{ playerid: 460014, teamid: YOUTH_TEAM_ID, wage: 4000 }];
     return tables;
   };
 
@@ -96,6 +99,21 @@ describe('academy selection', () => {
   test('a youth row with no player record is not a prospect', () => {
     const doc = build(academy());
     assert.equal(doc.academy.some((p) => p.playerId === 459968), false);
+  });
+
+  test('a delivered report is not one of your prospects until it has a contract', () => {
+    // Verified against a real save: a scout report lands the player in the
+    // academy squad with no contract row and no career_youthplayers row.
+    // Signing him in game is what writes the contract.
+    const tables = academy();
+    tables['players'] = [...tables['players']!, { playerid: 461710, overallrating: 59, potential: 69, preferredposition1: 25, birthdate: 159000 }];
+    tables['teamplayerlinks'] = [...tables['teamplayerlinks']!, { teamid: YOUTH_TEAM_ID, playerid: 461710, jerseynumber: 99, position: 25 }];
+
+    const doc = build(tables);
+    assert.deepEqual(doc.academy.map((p) => p.playerId), [460014], 'only the contracted prospect is yours');
+    assert.deepEqual(doc.academyReports.map((p) => p.playerId), [461710], 'the delivered report waits here');
+    assert.ok(doc.academyReports[0]!.report.verdict, 'and it carries a signing verdict');
+    assert.ok(doc.academyReports[0]!.groups.length, 'with the full attribute sheet, like any player');
   });
 
   test('carries the youth scouting fields', () => {
