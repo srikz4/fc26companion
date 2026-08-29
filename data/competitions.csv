@@ -11,3 +11,9 @@ C223,UEFA Champions League
 C224,UEFA Europa League
 C225,UEFA Conference League
 C228,Community Shield
+# Some competitions are written with a blank short code and identify themselves
+# only by compobjid. Those are keyed OBJ<id> — a leading '#' would be read as a
+# comment. 808 is the league campaign (named in code, since it is the user's own
+# league); 498 is the Community Shield, confirmed in game 2026-08-29 after a
+# pre-season win appeared under a blank code.
+OBJ498,Community Shield

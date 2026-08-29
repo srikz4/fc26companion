@@ -269,6 +269,9 @@ export interface ViewDocument {
       position: number | null;
       prevPosition: number | null;
       movedDivision: 'up' | 'down' | null;
+      form: number | null;
+      formLong: number | null;
+      lastResult: number | null;
       played: number;
       wins: number;
       draws: number;
@@ -1494,7 +1497,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
           ? (input.competitions?.get(code) ?? code)
           : objId === 808
             ? (leagueNameOf.get(num(rowsOf(tables, 'career_users')[0], 'leagueid') ?? -1) ?? 'League campaign')
-            : `Competition #${objId}~`;
+            : (input.competitions?.get(`OBJ${objId}`) ?? `Competition #${objId}~`);
         return {
           name,
           season: num(r, 'season') ?? 0,
@@ -1535,6 +1538,12 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         prevPosition: moved ? null : num(l, 'previousyeartableposition'),
         /** 'up' or 'down' when the club changed division over the summer. */
         movedDivision: (moved ? ((prevLeague ?? 0) > (league ?? 0) ? 'up' : 'down') : null) as 'up' | 'down' | null,
+        /** The game's own 0-100 recent-form number, which IS maintained live. */
+        form: num(l, 'teamshortform'),
+        /** Longer-run form on the same scale. */
+        formLong: num(l, 'teamlongform'),
+        /** 0 loss, 1 draw, 2 win — the last result, live. */
+        lastResult: num(l, 'lastgameresult'),
         played,
         wins,
         draws,
@@ -1552,7 +1561,17 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   const leagueTable = {
     league: leagueNameOf.get(userLeagueId ?? -1) ?? null,
     rows: leagueRows,
-    started: leagueRows.some((r) => r.played > 0),
+    /**
+     * Whether the save is keeping a live results record at all.
+     *
+     * It is not: FC 26 writes points, wins, draws, losses and goals into
+     * `leagueteamlinks` only at a season boundary, and leaves them at zero
+     * with a stale `nummatchesplayed` all season long (verified 2026-08-29 —
+     * two league matches played, every club still reading zero). What IS
+     * maintained live is the position and the form numbers, so those are what
+     * the table shows rather than a wall of dashes.
+     */
+    started: leagueRows.some((r) => r.played > 0 || r.points > 0),
   };
 
   // --- treatment room: who is out and who steps in ----------------------------

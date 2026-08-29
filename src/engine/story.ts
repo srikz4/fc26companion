@@ -97,7 +97,7 @@ export function deriveStoryEvents(input: StoryInput): StoryEventInput[] {
       ? (input.competitionOf(code) ?? code)
       : objId === 808
         ? 'the league'
-        : `an unnamed competition (#${objId})~`;
+        : (input.competitionOf(`OBJ${objId}`) ?? `an unnamed competition (#${objId})~`);
     add(`trophy:${sn}:${code || objId}`, 'trophy', `Won ${name}`, null, sn);
   }
 

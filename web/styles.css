@@ -1785,3 +1785,19 @@ main > .panel + .panel { margin-top: 14px; }
 .chbody b { color: var(--ink); font-weight: 650; }
 .chdetail { font-size: 11.5px; color: var(--ink-faint); }
 .chwhen { font-size: 10.5px; color: var(--ink-faint); font-weight: 650; white-space: nowrap; }
+
+/* ============================================================ league form */
+.formcell { display: inline-grid; grid-template-columns: minmax(38px, 1fr) 2.1em; align-items: center; gap: 7px; min-width: 76px; }
+.formcell .btrack { height: 5px; }
+.formcell b { font-size: 12px; font-weight: 750; text-align: right; }
+.lastres { font-size: 11px; font-weight: 800; }
+.lastres.up { color: var(--up); }
+.lastres.down { color: var(--down); }
+.lastres.flat { color: var(--ink-faint); }
+
+/* The campaign's narrating voice, in the campaign's own colour. */
+.chapterline {
+  margin: 4px 0 8px; padding: 6px 0 6px 11px;
+  border-left: 2px solid var(--rpg); color: var(--ink-dim);
+  font-size: 13px; line-height: 1.5;
+}

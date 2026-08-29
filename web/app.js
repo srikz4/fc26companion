@@ -4223,10 +4223,6 @@ function renderCentral(doc) {
       }
       box.appendChild(bar);
     }
-    if (settings.rpg) {
-      const line = campaignLine(doc);
-      if (line) box.appendChild(el('p', 'tipline', line));
-    }
     if (cur) {
       const wdl = el('div', 'hero-line');
       const pace = cur.points !== null && cur.played > 0 && cur.played < 38 ? Math.round((cur.points / cur.played) * 38) : null;
@@ -4253,25 +4249,53 @@ function renderCentral(doc) {
 
   if (settings.leagueTable && doc.leagueTable?.rows?.length) {
     const lt = doc.leagueTable;
-    const v = (x) => ({ text: lt.started ? x : '—', num: true });
     const box = el('div');
+    // The save keeps position and form live but writes results only at a season
+    // boundary, so the results columns appear only when there is a record to
+    // show. The rest of the season, form is the honest signal.
+    const RESULT = { 0: ['L', 'down'], 1: ['D', 'flat'], 2: ['W', 'up'] };
+    const formCell = (r) => {
+      if (r.form === null) return { text: '—' };
+      const box2 = el('span', 'formcell');
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill ${r.form >= 66 ? 't3' : r.form >= 40 ? 't2' : 't1'}`);
+      fill.style.width = `${Math.max(3, Math.min(100, r.form))}%`;
+      track.appendChild(fill);
+      box2.appendChild(track);
+      box2.appendChild(el('b', null, String(r.form)));
+      return {
+        node: box2,
+        text: r.form,
+        num: true,
+        sort: r.form,
+        title: `The game's own recent-form rating, 0–100${r.formLong !== null ? ` · ${r.formLong} over the longer run` : ''}.`,
+      };
+    };
     // The movement column is the insight the raw table hides: who is climbing
     // and who is falling relative to where they finished last season.
     box.appendChild(
       table(
-        [
-          { label: '#', num: true, always: true },
-          { label: '', always: true },
-          { label: 'Club', always: true },
-          { label: 'P', num: true, always: true },
-          { label: 'W', num: true, always: true },
-          { label: 'D', num: true, always: true },
-          { label: 'L', num: true, always: true },
-          { label: 'GF', num: true, always: true },
-          { label: 'GA', num: true, always: true },
-          { label: 'GD', num: true, always: true },
-          { label: 'Pts', num: true, always: true },
-        ],
+        lt.started
+          ? [
+              { label: '#', num: true, always: true },
+              { label: '', always: true },
+              { label: 'Club', always: true },
+              { label: 'P', num: true, always: true },
+              { label: 'W', num: true, always: true },
+              { label: 'D', num: true, always: true },
+              { label: 'L', num: true, always: true },
+              { label: 'GF', num: true, always: true },
+              { label: 'GA', num: true, always: true },
+              { label: 'GD', num: true, always: true },
+              { label: 'Pts', num: true, always: true },
+            ]
+          : [
+              { label: '#', num: true, always: true },
+              { label: '', always: true },
+              { label: 'Club', always: true },
+              { label: 'Form', num: true, always: true },
+              { label: 'Last', always: true },
+            ],
         lt.rows.map((r, i) => {
           const you = r.isUser ? 'you' : '';
           const rank = i + 1;
@@ -4292,19 +4316,31 @@ function renderCentral(doc) {
                   sort: String(move),
                   title: `Finished ${ordinal(r.prevPosition)} last season`,
                 };
-          return [
-            { text: rank, num: true, cls: you || undefined },
-            moveCell,
-            { text: `${r.name}${r.champion ? ' 👑' : ''}`, cls: you || undefined, title: r.champion ? 'Reigning champions' : undefined },
-            { ...v(r.played), cls: you || undefined },
-            { ...v(r.wins), cls: you || undefined },
-            { ...v(r.draws), cls: you || undefined },
-            { ...v(r.losses), cls: you || undefined },
-            { ...v(r.gf), cls: you || undefined },
-            { ...v(r.ga), cls: you || undefined },
-            { ...v(r.gd), cls: you || undefined },
-            { ...v(r.points), cls: you || undefined },
-          ];
+          const nameCell = { text: r.name, cls: you || undefined };
+          const last = r.lastResult !== null ? RESULT[r.lastResult] : null;
+          return lt.started
+            ? [
+                { text: rank, num: true, cls: you || undefined },
+                moveCell,
+                nameCell,
+                { text: r.played, num: true, cls: you || undefined },
+                { text: r.wins, num: true, cls: you || undefined },
+                { text: r.draws, num: true, cls: you || undefined },
+                { text: r.losses, num: true, cls: you || undefined },
+                { text: r.gf, num: true, cls: you || undefined },
+                { text: r.ga, num: true, cls: you || undefined },
+                { text: r.gd, num: true, cls: you || undefined },
+                { text: r.points, num: true, cls: you || undefined },
+              ]
+            : [
+                { text: rank, num: true, cls: you || undefined },
+                moveCell,
+                nameCell,
+                { ...formCell(r), cls: you || undefined },
+                last
+                  ? { node: el('span', `lastres ${last[1]}`, last[0]), text: last[0], sort: r.lastResult }
+                  : { text: '—' },
+              ];
         }),
         { tight: true },
       ),
@@ -4312,7 +4348,7 @@ function renderCentral(doc) {
     box.appendChild(
       el('p', 'muted tiny', lt.started
         ? 'Arrows compare today\u2019s order with where each club finished last season.'
-        : 'No league match recorded yet this season — the order carries over from the save, the arrows show last season\u2019s finish, and the numbers fill in match by match.'),
+        : 'FC 26 keeps the league position and the form ratings live, but only writes points, results and goals at a season boundary — so this table shows what is actually maintained. Arrows compare today\u2019s order with last season\u2019s finish.'),
     );
     panel(colMain, `🏟 ${lt.league ?? 'League table'}`, box);
   }
@@ -4664,6 +4700,10 @@ function renderCampaign(doc) {
       steps.appendChild(dot);
     }
     hero.appendChild(steps);
+    // The chapter line is the campaign's voice, so it lives with the campaign
+    // rather than on the first screen everybody reads for facts.
+    const chapter = campaignLine(doc);
+    if (chapter) hero.appendChild(el('p', 'chapterline', chapter));
     hero.appendChild(el('p', 'muted tiny', `Season ${seasonsRun} of a ${CAREER}-season career.`));
     frag.appendChild(hero);
   }
@@ -4776,6 +4816,8 @@ function questStrip(doc, where) {
   const head = el('h2', null, CAMPAIGNS[campaign.type].name);
   head.appendChild(el('span', 'questbadge', all.phase.label));
   box.appendChild(head);
+  const chapter = campaignLine(doc);
+  if (chapter) box.appendChild(el('p', 'chapterline', chapter));
   const grid = el('div', 'queststrip');
   for (const q of mine) grid.appendChild(questRow(q.name, q.line, q.pct, q.done, true));
   box.appendChild(grid);
