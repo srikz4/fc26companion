@@ -1865,3 +1865,47 @@ main > .panel + .panel { margin-top: 14px; }
 .storycols > *, .linkgrid > *, .devgrid > *, .wagegrid > *, .loangrid > *,
 .gapgrid > *, .compgrid > *, .depthgrid > *, .queststrip > * { min-width: 0; }
 @media (max-width: 900px) { .storycols { grid-template-columns: minmax(0, 1fr); } }
+
+/* ============================================================ icons
+
+   Line icons at the app's own weight, inheriting text colour. Emoji are gone
+   from every heading and every ledger entry: they were doing an icon's job
+   and reading like a chat reply while they did it. */
+.ico { flex: none; display: inline-block; vertical-align: -0.15em; }
+.panel h2 .ico { color: var(--brand); opacity: 0.85; order: -1; }
+.rmarks .mk { display: inline-flex; align-items: center; }
+.chico { display: inline-flex; align-items: center; justify-content: center; color: var(--ink-faint); }
+.chico.k-trophy { color: var(--t4); }
+.chico.k-record-win, .chico.k-milestone, .chico.k-promotion { color: var(--up); }
+.chico.k-record-loss { color: var(--down); }
+.chico.k-signing, .chico.k-sale { color: var(--brand); }
+.infobtn { padding: 0; }
+.infobtn .ico { vertical-align: 0; }
+
+/* ============================================================ the sync light */
+.syncwrap { display: inline-flex; align-items: center; gap: 6px; }
+.syncdot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: var(--ink-faint); transition: background 0.25s, box-shadow 0.25s;
+}
+.syncdot.green { background: var(--up); box-shadow: 0 0 7px color-mix(in srgb, var(--up) 65%, transparent); }
+.syncdot.amber { background: var(--act, #facc15); box-shadow: 0 0 7px rgba(250, 204, 21, 0.6); }
+.syncdot.red { background: var(--down); box-shadow: 0 0 7px color-mix(in srgb, var(--down) 65%, transparent); }
+.syncdot.blue { background: var(--ai); box-shadow: 0 0 8px var(--ai); animation: pulse 1s ease-in-out infinite; }
+.syncdot.grey { background: var(--line); box-shadow: none; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .syncdot.blue { animation: none; } }
+
+/* The sub-nav is a horizontal scroller, but on a phone it was being squeezed
+   by its own container and clipping the tabs past the fold instead. Let it
+   take the full width and scroll, with a fade to show there is more. */
+@media (max-width: 700px) {
+  .subviews {
+    padding: 0 10px; gap: 0; min-height: 38px;
+    -webkit-overflow-scrolling: touch;
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%);
+  }
+  .subtab { flex: none; padding: 9px 11px; font-size: 12.5px; }
+  .subtab .count { margin-left: 4px; padding: 1px 5px; }
+  .views { mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%); }
+}

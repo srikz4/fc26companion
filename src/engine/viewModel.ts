@@ -1560,14 +1560,18 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     league: leagueNameOf.get(userLeagueId ?? -1) ?? null,
     rows: leagueRows,
     /**
-     * Whether the save is keeping a live results record at all.
+     * Whether THIS league's results are in the save.
      *
-     * It is not: FC 26 writes points, wins, draws, losses and goals into
-     * `leagueteamlinks` only at a season boundary, and leaves them at zero
-     * with a stale `nummatchesplayed` all season long (verified 2026-08-29 —
-     * two league matches played, every club still reading zero). What IS
-     * maintained live is the position and the form numbers, so those are what
-     * the table shows rather than a wall of dashes.
+     * They are not always. `leagueteamlinks` genuinely carries points, wins,
+     * draws, losses and goals — Argentina's Primera Division is populated for
+     * all 30 clubs in the same save that has the Premier League at zero — but
+     * for the user's own league FC 26 wrote nothing across 44 saves in one
+     * session with matches played, leaving a stale `nummatchesplayed` from
+     * last season behind (measured 2026-08-29).
+     *
+     * So this is asked of the data rather than assumed: when results are there
+     * the table shows them, and when they are not it falls back to what is
+     * unquestionably live — position and form — instead of a wall of dashes.
      */
     started: leagueRows.some((r) => r.played > 0 || r.points > 0),
   };

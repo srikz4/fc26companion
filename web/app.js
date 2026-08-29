@@ -10,6 +10,8 @@
  * one way but not the other.
  */
 
+import { icon, HEADING_ICONS, EVENT_ICONS } from './icons.js';
+
 const DWELL_MS = 900;
 
 /**
@@ -34,6 +36,7 @@ const SETTING_DEFS = [
   { key: 'treatment', group: 'Central', label: 'Treatment room', note: 'Injured and suspended players with recovery time and a computed stand-in each.', on: true },
   { key: 'leagueTable', group: 'Central', label: 'League table', note: 'Your division\u2019s live table, straight from the save, your row highlighted.', on: true },
   { key: 'newsFeed', group: 'Central', label: 'Around the world', note: 'The save\u2019s own event feed — transfers and news across this world.', on: true },
+  { key: 'scoutReports', group: 'Guidance', label: 'Scout report verdicts', note: 'Reads the prospects a scout has delivered and calls each one sign, watch or pass. Switch it off to judge the reports yourself in game — the tab disappears entirely and nothing about them is shown.', on: true },
   { key: 'developFocus', group: 'Guidance', label: 'Development focus', note: 'On the player card: the attributes where growth buys the most, from the fit weights and this world\u2019s percentiles. Point the game\u2019s development plans at them.', on: true },
   { key: 'absurd', group: 'Guidance', label: 'The absurd bit', note: 'The cheeky lines on the Story card.', on: true },
   { key: 'compact', group: 'Preferences', label: 'Compact density', note: 'Tighter paddings and smaller type everywhere — more career per screen.', on: false },
@@ -113,6 +116,8 @@ const state = {
   open: new Set(),
   attrs: new Set(),
   lastSync: null,
+  /** 'live' | 'loading' | 'offline' — what the sync light is saying. */
+  connection: 'live',
 };
 
 const $ = (s) => document.querySelector(s);
@@ -1190,9 +1195,17 @@ function playerNameCell(p) {
   if (p.nameProvisional) nm.appendChild(el('span', 'prov', '~'));
   box.appendChild(nm);
   const marks = el('span', 'rmarks');
-  if (p.injured) marks.appendChild(el('i', 'mk down', '✚'));
-  if (p.nationalTeam) marks.appendChild(el('i', 'mk info', '⚑'));
-  if (p.potentialTag === 'Special' || p.potentialTag === 'Exciting') marks.appendChild(el('i', 'mk gold', '◆'));
+  const mark = (cls, name, tip) => {
+    const holder = el('i', `mk ${cls}`);
+    holder.appendChild(icon(name, 13));
+    holder.dataset.tip = tip;
+    marks.appendChild(holder);
+  };
+  if (p.injured) mark('down', 'cross', 'Injured');
+  if (p.nationalTeam) mark('info', 'flag', 'Away with his country');
+  if (p.potentialTag === 'Special' || p.potentialTag === 'Exciting') {
+    mark('gold', 'gem', `${p.potentialTag} ceiling`);
+  }
   if (marks.childElementCount) box.appendChild(marks);
   return box;
 }
@@ -4316,13 +4329,13 @@ function renderCentral(doc) {
               { label: 'Pts', num: true, always: true },
             ]
           : [
-              { label: '#', num: true, always: true },
+              { label: '', always: true },
               { label: '', always: true },
               { label: 'Club', always: true },
               { label: 'Form', num: true, always: true },
               { label: 'Last', always: true },
             ],
-        lt.rows.map((r, i) => {
+        (lt.started ? lt.rows : [...lt.rows].sort((a, b) => (b.form ?? -1) - (a.form ?? -1))).map((r, i) => {
           const you = r.isUser ? 'you' : '';
           const rank = i + 1;
           const move = r.prevPosition !== null && r.prevPosition > 0 ? r.prevPosition - rank : null;
@@ -4359,8 +4372,8 @@ function renderCentral(doc) {
                 { text: r.points, num: true, cls: you || undefined },
               ]
             : [
-                { text: rank, num: true, cls: you || undefined },
-                moveCell,
+                { text: '', cls: you || undefined },
+                { text: '', cls: you || undefined },
                 nameCell,
                 { ...formCell(r), cls: you || undefined },
                 last
@@ -4374,9 +4387,9 @@ function renderCentral(doc) {
     box.appendChild(
       el('p', 'muted tiny', lt.started
         ? 'Arrows compare today\u2019s order with where each club finished last season.'
-        : 'FC 26 keeps the league position and the form ratings live, but only writes points, results and goals at a season boundary — so this table shows what is actually maintained. Arrows compare today\u2019s order with last season\u2019s finish.'),
+        : 'The live table is not in the save — the game keeps it, but not in a form Companion has decoded yet, and the position field it does write does not match what the game shows. Rather than print an order that is wrong, this lists the division by the game’s own recent-form rating, which IS live. Your own record sits above, and it is exact.'),
     );
-    panel(colMain, `🏟 ${lt.league ?? 'League table'}`, box);
+    panel(colMain, lt.started ? `${lt.league ?? 'League table'}` : `${lt.league ?? 'Your division'} — by form`, box);
   }
 
   {
@@ -4947,10 +4960,7 @@ function renderChronicle(doc) {
     // The ledger is the source: dated entries written the first time each thing
     // was seen. What it has not witnessed yet is filled from the season record,
     // undated and marked as such, rather than pretending to a date.
-    const ICON = {
-      trophy: '🏆', season: '📅', signing: '🖊', sale: '💰',
-      'record-win': '💥', 'record-loss': '🩹', promotion: '🎓', milestone: '📈',
-    };
+    const iconFor = (kind) => icon(EVENT_ICONS[kind] ?? 'check', 14);
     // A date is shown only when it belongs to the season it is filed under.
     // Everything already in the save when the watcher started was stamped with
     // the day we first read it, and dating season one with today's date would
@@ -4962,25 +4972,27 @@ function renderChronicle(doc) {
     };
     const ledger = (doc.story ?? []).filter((e) => e.season === sn.season && e.kind !== 'season');
     const events = ledger.map((e) => [
-      ICON[e.kind] ?? '·',
+      e.kind,
       e.title,
       e.detail,
       seasonOfDate(e.gameDate) === e.season ? e.gameDate : null,
     ]);
     if (!ledger.length) {
-      for (const name of compsBySeason.get(sn.season) ?? []) events.push(['🏆', `Won the ${name}`, null, null]);
-      if (sn.bigBuy) events.push(['🖊', `Signed ${sn.bigBuy.name}`, moneyShort(sn.bigBuy.amount), null]);
-      if (sn.bigSell) events.push(['💰', `Sold ${sn.bigSell.name}`, moneyShort(sn.bigSell.amount), null]);
+      for (const name of compsBySeason.get(sn.season) ?? []) events.push(['trophy', `Won the ${name}`, null, null]);
+      if (sn.bigBuy) events.push(['signing', `Signed ${sn.bigBuy.name}`, moneyShort(sn.bigBuy.amount), null]);
+      if (sn.bigSell) events.push(['sale', `Sold ${sn.bigSell.name}`, moneyShort(sn.bigSell.amount), null]);
     }
     if (live) {
       const pace = sn.played ? Math.round(((sn.points ?? 0) / sn.played) * 38) : null;
-      if (pace !== null) events.push(['📈', `${sn.played} played, on a ${pace}-point pace`, null, null]);
+      if (pace !== null) events.push(['milestone', `${sn.played} played, on a ${pace}-point pace`, null, null]);
     }
     if (events.length) {
       const list = el('div', 'chevents');
-      for (const [icon, text, detail, when] of events) {
+      for (const [kind, text, detail, when] of events) {
         const row = el('div', 'chevent');
-        row.appendChild(el('i', null, icon));
+        const mark = el('i', `chico k-${kind}`);
+        mark.appendChild(iconFor(kind));
+        row.appendChild(mark);
         const body = el('span', 'chbody');
         body.appendChild(el('b', null, text));
         if (detail) body.appendChild(el('span', 'chdetail', detail));
@@ -5146,7 +5158,7 @@ const VIEWS = {
     label: 'Academy',
     subs: [
       { id: 'players', label: 'My Academy', render: renderAcademyHub, players: true, count: (d) => d.academy.length || null },
-      { id: 'scouting', label: 'Scout Reports', render: renderScouting, count: (d) => d.scouts.length || null },
+      { id: 'scouting', label: 'Scout Reports', render: renderScouting, count: (d) => (settings.scoutReports ? d.academyReports.length || null : null), hidden: () => !settings.scoutReports },
     ],
   },
   office: {
@@ -5175,8 +5187,9 @@ const VIEWS = {
 const activeSub = () => {
   const view = VIEWS[state.view];
   if (!view?.subs) return null;
+  const shown = view.subs.filter((s2) => !s2.hidden?.());
   const stored = state.subs[state.view];
-  return view.subs.find((s2) => s2.id === stored) ?? view.subs[0];
+  return shown.find((s2) => s2.id === stored) ?? shown[0] ?? null;
 };
 
 /* ---------------- shell ---------------- */
@@ -5207,7 +5220,7 @@ function renderShell(doc) {
   const activeView = VIEWS[state.view];
   const sub = activeSub();
   if (activeView.subs) {
-    for (const s2 of activeView.subs) {
+    for (const s2 of activeView.subs.filter((x) => !x.hidden?.())) {
       const b = el('button', `subtab${sub?.id === s2.id ? ' is-active' : ''}`);
       b.append(s2.label);
       const n2 = s2.count ? s2.count(doc) : null;
@@ -5323,13 +5336,20 @@ function polishPanels(root) {
     const h = panel.querySelector(':scope > h2');
     if (!h) continue;
 
-    // The heading is a name, not a decorated sentence.
+    // The heading is a name with a mark, not a decorated sentence: emoji out,
+    // one line icon in, chosen centrally so the set stays small and no view
+    // has to remember.
     for (const node of h.childNodes) {
       if (node.nodeType !== 3) continue;
       node.textContent = node.textContent.replace(
         /^[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}]+\s*/u,
         '',
       );
+    }
+    if (!h.querySelector('.ico')) {
+      const label = h.textContent.trim();
+      const hit = HEADING_ICONS.find(([re]) => re.test(label));
+      if (hit) h.prepend(icon(hit[1], 15));
     }
 
     // Every explanatory paragraph inside the panel, however deeply a view
@@ -5343,7 +5363,8 @@ function polishPanels(root) {
     ).length;
     if (!prose.length || substantive === 0) continue;
 
-    const info = el('button', 'infobtn', 'i');
+    const info = el('button', 'infobtn');
+    info.appendChild(icon('info', 13));
     info.setAttribute('aria-label', 'About this panel');
     info.dataset.tip = prose.map((x) => x.textContent.trim()).filter(Boolean).join('\n\n');
     h.appendChild(info);
@@ -5400,11 +5421,67 @@ function render() {
     `${doc.snapshots} snapshot${doc.snapshots === 1 ? '' : 's'} · names ${doc.names.squad[0]}/${doc.names.squad[1]}`;
 }
 
+/**
+ * The sync light, which answers "is what I am looking at current?".
+ *
+ *   blue   a new save has landed and is being read
+ *   green  fresh — read within the last ten minutes
+ *   amber  ten minutes old; the game has probably moved on
+ *   red    half an hour old; save in game to catch up
+ *   grey   not connected to the server at all
+ *
+ * The clock is wall-clock time since the last save Companion read, which is
+ * the only thing that can tell you the screen is behind the game.
+ */
+function paintSync() {
+  const node = $('#synced');
+  if (!node) return;
+  const dot = $('#syncdot');
+
+  if (state.connection === 'offline') {
+    node.textContent = 'not connected';
+    if (dot) dot.className = 'syncdot grey';
+    node.dataset.tip = 'The Companion server is not answering. Start it again (Companion.vbs) and this reconnects on its own.';
+    return;
+  }
+  if (state.connection === 'loading') {
+    node.textContent = 'reading save…';
+    if (dot) dot.className = 'syncdot blue';
+    node.dataset.tip = 'A new save landed and is being parsed.';
+    return;
+  }
+  if (!state.lastSync) {
+    node.textContent = 'never synced';
+    if (dot) dot.className = 'syncdot grey';
+    return;
+  }
+
+  const secs = Math.round((Date.now() - state.lastSync) / 1000);
+  const mins = secs / 60;
+  node.textContent = secs < 60 ? `synced ${secs}s ago` : `synced ${Math.round(mins)}m ago`;
+  if (dot) dot.className = `syncdot ${mins >= 30 ? 'red' : mins >= 10 ? 'amber' : 'green'}`;
+  node.dataset.tip =
+    mins >= 30
+      ? 'Half an hour since the last save Companion read — the screen is almost certainly behind the game. Save in game to catch up.'
+      : mins >= 10
+        ? 'Ten minutes since the last save. If something looks out of date, save in game.'
+        : 'Companion reads the save file, so it is only ever as current as your last save. Save in game and it updates within a few seconds.';
+}
+
 async function load(flash = false) {
-  const response = await fetch('/api/view', { cache: 'no-store' });
-  state.doc = await response.json();
-  state.lastSync = Date.now();
+  try {
+    const response = await fetch('/api/view', { cache: 'no-store' });
+    if (!response.ok) throw new Error(String(response.status));
+    state.doc = await response.json();
+    state.lastSync = Date.now();
+    state.connection = 'live';
+  } catch {
+    state.connection = 'offline';
+    paintSync();
+    return;
+  }
   render();
+  paintSync();
   if (flash) {
     document.body.classList.add('flash');
     setTimeout(() => document.body.classList.remove('flash'), 1000);
@@ -5450,13 +5527,24 @@ function wire() {
 
 
   const events = new EventSource('/api/events');
-  events.addEventListener('refresh', () => load(true));
+  events.addEventListener('refresh', () => {
+    // A save landed: say so while it is being read, then settle to fresh.
+    state.connection = 'loading';
+    paintSync();
+    load(true);
+  });
+  events.addEventListener('error', () => {
+    if (events.readyState === EventSource.CLOSED) {
+      state.connection = 'offline';
+      paintSync();
+    }
+  });
+  events.addEventListener('open', () => {
+    if (state.connection === 'offline') load(true);
+  });
 
-  setInterval(() => {
-    if (!state.lastSync) return;
-    const s = Math.round((Date.now() - state.lastSync) / 1000);
-    $('#synced').textContent = s < 60 ? `synced ${s}s ago` : `synced ${Math.round(s / 60)}m ago`;
-  }, 1000);
+  setInterval(paintSync, 1000);
+  paintSync();
 }
 
 wire();
