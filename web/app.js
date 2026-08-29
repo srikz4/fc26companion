@@ -2314,11 +2314,23 @@ function negotiationRows(sel) {
     ];
   }
   const spread = g.high > g.low ? Math.round(((g.high - g.low) / g.mid) * 100) : 0;
-  return [
+  const w = sel?.wageGuide;
+  const rows = [
     ['Open at', moneyShort(g.low), `The least this world has paid for a player of his profile, across ${g.sample} completed deals. A first offer, not an insult.`],
-    ['Likely to take', moneyShort(g.mid), `The middle of what this world pays for this profile. Budget for this.`],
+    ['Likely to take', moneyShort(g.mid), 'The middle of what this world pays for this profile. Budget for this.'],
     ['Over the odds above', moneyShort(g.high), `Past this you are paying more than any comparable deal in this world. The band is ${spread}% wide on ${g.sample} deals — treat it as a direction, not a price tag.`],
   ];
+  // The fee is only half a signing. A wage is agreed in the same negotiation
+  // and comes from the same completed deals, so it is priced the same way.
+  if (w) {
+    rows.push(
+      ['Wage he expects', `${moneyShort(w.mid)}/wk`, `What this world pays a player of his profile, from the wages on ${w.sample} completed deals.`],
+      ['Wage room', `${moneyShort(w.low)}–${moneyShort(w.high)}/wk`, 'The low end is worth trying first; past the high end you are bidding against nobody.'],
+    );
+  } else {
+    rows.push(['Wage he expects', null, 'No completed deal in this world is close enough to his profile to price his wage from.']);
+  }
+  return rows;
 }
 
 function renderTransfers(doc) {

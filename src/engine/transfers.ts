@@ -100,6 +100,8 @@ export interface TransferTarget {
   posShort: string | null;
   /** Fitted fair-fee band from this world's observed deals, when a model exists. */
   feeGuide: FeeEstimate | null;
+  /** What this world pays a player of that profile, per week. */
+  wageGuide: FeeEstimate | null;
   teamId: number | null;
   teamName: string | null;
   slot: Slot;
@@ -277,6 +279,10 @@ export function findTargets(
         feeGuide:
           dealsModel.estimate && potential !== null
             ? dealsModel.estimate(overall, age, potential)
+            : null,
+        wageGuide:
+          dealsModel.wageEstimate && potential !== null
+            ? dealsModel.wageEstimate(overall, age, potential)
             : null,
         teamId: clubOf.get(playerId) ?? null,
         teamName: teamNames.get(clubOf.get(playerId) ?? -1) ?? null,

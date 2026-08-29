@@ -1403,6 +1403,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     teamNames,
     nameOf,
     (p) => ageAt(num(p, 'birthdate'), gameDate.date),
+    clubId,
   );
 
   const teamOverall = new Map<number, number>();

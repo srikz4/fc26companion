@@ -53,6 +53,8 @@ export interface DealsModel {
   /** Null when the world has too few priced deals to fit anything. The function
    * itself returns null for a player outside the observed market's range. */
   estimate: ((overall: number, age: number, potential: number) => FeeEstimate | null) | null;
+  /** What this world pays a player of that profile, per week. */
+  wageEstimate: ((overall: number, age: number, potential: number) => FeeEstimate | null) | null;
   sample: number;
 }
 
@@ -83,6 +85,8 @@ export function buildDealsModel(
   teamNames: Map<number, string>,
   nameOf: (id: number) => string,
   ageOf: (player: Row) => number | null,
+  /** Your club, whose own deals are kept out of the fit. */
+  ourClubId: number | null = null,
 ): DealsModel {
   const deals: DealRecord[] = [];
 
@@ -117,9 +121,92 @@ export function buildDealsModel(
   }
   deals.sort((a, b) => b.fee - a.fee);
 
-  // Fit log(fee) = a + b·overall + c·age + d·potential on complete rows.
+  /**
+   * Fit log(fee) = a + b·overall + c·age + d·potential — on OTHER clubs' deals.
+   *
+   * Your own signings are excluded, and that is the whole point of the model.
+   * It is meant to answer "what does this world pay", so that you can tell
+   * whether your offer is sane. Training it on your own offers makes it agree
+   * with you by construction: two signings at 90M and 110M pulled the top of
+   * the fitted market up to match them, and it went on to price a comparable
+   * player at 115M when the selling club would in fact have taken 74M.
+   *
+   * They stay in the displayed list — they are real deals in this world and
+   * worth seeing — they just do not get a vote on what things cost.
+   */
   const usable = deals.filter(
-    (d) => d.overall !== null && d.age !== null && d.potential !== null && d.fee >= 10000,
+    (d) =>
+      d.overall !== null &&
+      d.age !== null &&
+      d.potential !== null &&
+      d.fee >= 10000 &&
+      (ourClubId === null || d.toTeamId !== ourClubId),
+  );
+
+  /**
+   * The same fit, over whatever number a deal carries.
+   *
+   * Fees and wages are priced by the same three things — how good he is, how
+   * old he is, how much better he might get — and both spread multiplicatively,
+   * so both want a log-linear fit and a band one residual either side. Sharing
+   * the machinery means the wage guide inherits the fee guide's refusal to
+   * extrapolate, which is the part that matters: a curve fitted between 77 and
+   * 91 overall says nothing trustworthy about a 94, and should say so.
+   */
+  const fitBand = (
+    rows: DealRecord[],
+    valueOf: (d: DealRecord) => number | null,
+    roundTo: (v: number) => number,
+  ): DealsModel['estimate'] => {
+    const points = rows
+      .map((d) => ({ d, v: valueOf(d) }))
+      .filter((x): x is { d: DealRecord; v: number } => x.v !== null && x.v > 0);
+    if (points.length < 8) return null;
+
+    const dims = 4;
+    const A = Array.from({ length: dims }, () => new Array(dims).fill(0));
+    const b = new Array(dims).fill(0);
+    for (const { d, v } of points) {
+      const row = [1, d.overall!, d.age!, d.potential!];
+      const y = Math.log(v);
+      for (let j = 0; j < dims; j++) {
+        b[j] += row[j]! * y;
+        for (let k = 0; k < dims; k++) A[j]![k]! += row[j]! * row[k]!;
+      }
+    }
+    for (let j = 0; j < dims; j++) A[j]![j]! += 1e-6;
+    const coef = solve(A, b);
+    if (!coef) return null;
+
+    const residuals = points.map(({ d, v }) =>
+      Math.log(v) - (coef[0]! + coef[1]! * d.overall! + coef[2]! * d.age! + coef[3]! * d.potential!),
+    );
+    const sd = Math.sqrt(residuals.reduce((acc, r) => acc + r * r, 0) / residuals.length) || 0.5;
+    const maxOverall = Math.max(...points.map((x) => x.d.overall!));
+    const minOverall = Math.min(...points.map((x) => x.d.overall!));
+    const cap = Math.max(...points.map((x) => x.v)) * 1.6;
+    const sample = points.length;
+
+    return (overall, age, potential) => {
+      if (overall > maxOverall + 2 || overall < minOverall - 4) return null;
+      const mid = Math.exp(coef[0]! + coef[1]! * overall + coef[2]! * age + coef[3]! * potential);
+      return {
+        low: roundTo(Math.min(mid * Math.exp(-sd), cap)),
+        mid: roundTo(Math.min(mid, cap)),
+        high: roundTo(Math.min(mid * Math.exp(sd), cap)),
+        sample,
+      };
+    };
+  };
+
+  // Wages land in the thousands, not the millions, so they round differently.
+  const wageEstimate = fitBand(
+    usable,
+    (d) => d.wage,
+    (v) => {
+      const magnitude = v >= 100_000 ? 5000 : v >= 20_000 ? 1000 : 500;
+      return Math.max(magnitude, Math.round(v / magnitude) * magnitude);
+    },
   );
 
   let estimate: DealsModel['estimate'] = null;
@@ -172,5 +259,5 @@ export function buildDealsModel(
     }
   }
 
-  return { deals: deals.slice(0, 20), estimate, sample: usable.length };
+  return { deals: deals.slice(0, 20), estimate, wageEstimate, sample: usable.length };
 }
