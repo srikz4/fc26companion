@@ -833,8 +833,7 @@ function basicFace(card, p) {
   card.appendChild(
     tileRow([
       ['Minutes', p.minutesThisSeason],
-      ['Apps', p.appearances],
-      ['Goals', p.goals || null],
+      ['Rated', p.ratedMatches],
       ['Rating', p.averageRating],
       ['Deal', p.contractMonths === null ? null : fmtTerm(p.contractMonths)],
       ['Role', p.squadRole === 'None' ? null : p.squadRole],
@@ -847,15 +846,14 @@ function basicFace(card, p) {
 
 /** stats: the season, and every match in it. */
 function statsFace(card, p) {
-  const apps = p.appearances ?? 0;
+  const apps = p.ratedMatches ?? 0;
   const mins = p.minutesThisSeason ?? 0;
   const per90 = (v) => (mins >= 90 && v !== null && v !== undefined ? Math.round((v / mins) * 90 * 100) / 100 : null);
   card.appendChild(
     tileRow([
-      ['Apps', apps],
+      ['Rated matches', apps, 'Matches behind the average, over the window the save keeps — not season appearances.'],
       ['Minutes', mins || null],
-      ['Goals', p.goals ?? 0],
-      ['Goals / 90', per90(p.goals)],
+
       ['Avg rating', p.averageRating, apps ? `Across ${apps} rated appearances` : undefined],
       ['Consistency', p.ratingSpread === null ? null : `±${p.ratingSpread}`, 'Spread of his match ratings — a low number means he shows up every week.'],
       ['Mins / app', apps ? Math.round(mins / apps) : null],
@@ -2985,10 +2983,6 @@ function renderStats(doc) {
     panel('🎂 Age profile', bars(s2.ageProfile.map((r) => barRow(r.band, r.count, maxBand, 70)))),
   );
 
-  const maxGoals = Math.max(1, ...s2.topScorers.map((r) => r.goals));
-  grid.appendChild(
-    panel('⚽ Top scorers', bars(s2.topScorers.map((r) => barRow(r.name, r.goals, maxGoals, 86)))),
-  );
 
   grid.appendChild(
     panel(
@@ -3148,13 +3142,12 @@ function renderSquadViews(doc, source, title) {
     panel.appendChild(el('h2', null, '📊 Season numbers'));
     panel.appendChild(
       table(
-        [{ label: 'Pos', pos: true }, 'Player', { label: 'OVR', num: true }, { label: 'Apps', num: true }, { label: 'Goals', num: true }, { label: 'Rating', num: true }, { label: 'Mins', num: true }, 'Form'],
+        [{ label: 'Pos', pos: true }, 'Player', { label: 'OVR', num: true }, { label: 'Rated', num: true }, { label: 'Rating', num: true }, { label: 'Mins', num: true }, 'Form'],
         list.map((p) => [
           { text: p.positionShort ?? '—', cls: 'posbadge' },
           { node: playerNameCell(p), text: p.name, sort: p.name },
           { text: p.overall ?? '—', num: true, tier: p.overall },
-          { text: p.appearances ?? '—', num: true },
-          { text: p.goals ?? '—', num: true },
+          { text: p.ratedMatches ?? '—', num: true },
           { text: p.averageRating ?? '—', num: true },
           { text: p.minutesThisSeason ?? '—', num: true },
           p.form ?? '—',
@@ -3870,8 +3863,10 @@ function bragFacts(doc) {
     { played: 0, wins: 0, draws: 0, losses: 0, gf: 0, ga: 0 },
   );
   const trophies = (doc.board?.competitions ?? []).filter((c) => c.won);
-  const scorer = (st.topScorers ?? [])[0] ?? null;
-  const scorer2 = (st.topScorers ?? [])[1] ?? null;
+  // No top scorer here: the save's goal totals disagree with the game's own
+  // screen, so the chronicle leans on ratings and minutes, which do not.
+  const scorer = null;
+  const scorer2 = null;
   const rated = (st.bestRated ?? [])[0] ?? null;
   const iron = (st.mostMinutes ?? [])[0] ?? null;
   const riser = (st.biggestRisers ?? [])[0] ?? null;
@@ -4457,11 +4452,6 @@ function campaignMissions(doc) {
 
   // Micro: one-save-away nudges from the leaders' own numbers.
   const micro = [];
-  const scorer = (doc.stats.topScorers ?? [])[0];
-  if (scorer) {
-    const nextS = Math.ceil((scorer.goals + 1) / 5) * 5;
-    micro.push({ name: `${scorer.name.split(' ').pop()} to ${nextS}`, line: `${scorer.goals} goals — ${nextS - scorer.goals} to the next mark.`, pct: Math.round((scorer.goals / nextS) * 100), done: false, where: 'squad/tactics' });
-  }
   const rated = (doc.stats.bestRated ?? [])[0];
   if (rated && rated.apps >= 5) micro.push({ name: 'Keep the standard', line: `${rated.name.split(' ').pop()} averages ${rated.rating.toFixed(1)} — hold 8.0+.`, pct: Math.min(100, Math.round((rated.rating / 8) * 100)), done: rated.rating >= 8, where: 'squad/tactics' });
   const starved = [...doc.senior, ...doc.academy]

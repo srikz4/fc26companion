@@ -1398,7 +1398,16 @@ td.res.r-l { color: var(--down); }
   width: 13px; height: 14px;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.streak { display: inline-flex; line-height: 0; pointer-events: none; }
+/*
+ * Only the mark inside a number cell ignores the pointer.
+ *
+ * There the tooltip belongs to the cell, so the icon must not intercept it.
+ * Everywhere else the mark IS the thing you hover — a squad-row badge carries
+ * its own explanation — and swallowing pointer events left it silent while the
+ * flag and the gem beside it answered.
+ */
+.streak { display: inline-flex; line-height: 0; }
+.streaknum .streak { pointer-events: none; }
 .streak .ico { width: 13px; height: 13px; }
 .streak.spark .ico { width: 12px; height: 12px; stroke-width: 2; }
 .streak.blaze .ico { width: 15px; height: 15px; stroke-width: 2.3; }

@@ -129,7 +129,24 @@ async function main(): Promise<void> {
         return;
       }
 
-      const bytesAll = present.map((s) => readFileSync(s.path));
+      /**
+       * The game renames its save on every write, so a file listed a moment ago
+       * can be gone by the time we open it. That is normal, not an error: skip
+       * what has vanished and read what is there.
+       */
+      const readable: { path: string; bytes: Buffer }[] = [];
+      for (const f of present) {
+        try {
+          readable.push({ path: f.path, bytes: readFileSync(f.path) });
+        } catch {
+          /* written over while we were looking at it */
+        }
+      }
+      if (!readable.length) {
+        console.log('the save moved while it was being read — waiting for the next one.');
+        return;
+      }
+      const bytesAll = readable.map((r) => r.bytes);
       const parsedAll: Tables[] = bytesAll.map((b) => parseSave(b, meta).tables);
       const tables = parsedAll[0]!;
       // The in-game shortlist lives in the tagged career blob after the

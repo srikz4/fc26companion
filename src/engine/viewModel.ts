@@ -181,8 +181,19 @@ export interface PlayerView {
   squadRole: string | null;
 
   minutesThisSeason: number | null;
-  appearances: number | null;
-  goals: number | null;
+  /**
+   * Matches behind the average rating — NOT season appearances.
+   *
+   * The save keeps a rolling window of recent matches per player, not a season
+   * total, so this is the size of that window. Season appearances and goals are
+   * not shown at all: `teamplayerlinks.leagueappearances` reads zero for every
+   * player while the game shows twenty-odd, and `leaguegoals` disagrees with the
+   * game's own figure. Searching the whole save for a field holding a player's
+   * goal total found nothing that holds for players with distinctive counts, so
+   * the totals are computed by the game from something not yet decoded. A wrong
+   * number is worse than no number, so there is no number.
+   */
+  ratedMatches: number | null;
   averageRating: number | null;
   recentRatings: MatchRating[];
 
@@ -593,7 +604,6 @@ export interface StatsView {
   totalMinutes: number;
   wageBill: number;
   byPosition: { slot: string; count: number; meanOverall: number | null; meanAge: number | null }[];
-  topScorers: { playerId: number; name: string; goals: number }[];
   bestRated: { playerId: number; name: string; rating: number; apps: number }[];
   mostMinutes: { playerId: number; name: string; minutes: number }[];
   biggestRisers: { playerId: number; name: string; delta: number }[];
@@ -1180,8 +1190,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       squadRole: SQUAD_ROLE_LABELS[num(contract, 'playerrole') ?? -99] ?? null,
 
       minutesThisSeason: history.length ? minutes : null,
-      appearances: history.length || null,
-      goals: num(link, 'leaguegoals'),
+      ratedMatches: history.length || null,
       averageRating: avg,
       recentRatings: history.slice(-8),
 
@@ -2314,16 +2323,11 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         meanAge: mean(list.map((p) => p.age)),
       }))
       .sort((a, b) => b.count - a.count),
-    topScorers: senior
-      .filter((p) => (p.goals ?? 0) > 0)
-      .sort((a, b) => (b.goals ?? 0) - (a.goals ?? 0))
-      .slice(0, 8)
-      .map((p) => ({ playerId: p.playerId, name: p.name, goals: p.goals! })),
     bestRated: senior
       .filter((p) => p.averageRating !== null)
       .sort((a, b) => b.averageRating! - a.averageRating!)
       .slice(0, 8)
-      .map((p) => ({ playerId: p.playerId, name: p.name, rating: p.averageRating!, apps: p.appearances ?? 0 })),
+      .map((p) => ({ playerId: p.playerId, name: p.name, rating: p.averageRating!, apps: p.ratedMatches ?? 0 })),
     mostMinutes: senior
       .filter((p) => (p.minutesThisSeason ?? 0) > 0)
       .sort((a, b) => (b.minutesThisSeason ?? 0) - (a.minutesThisSeason ?? 0))
