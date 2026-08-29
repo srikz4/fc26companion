@@ -4545,7 +4545,11 @@ function renderCentral(doc) {
         node: box2,
         text: r.form5.join(''),
         sort: r.form,
-        title: `Last five matches in all competitions, oldest first — ${r.form5.join(' ')}. Form rating ${r.form}/100, which is exactly what those five are worth in points${r.formLong !== null ? `; ${r.formLong} over the longer run` : ''}.`,
+        title:
+          `Last five matches in all competitions, oldest first — ${r.form5.join(' ')}. ` +
+          `That is ${Math.round(((r.form ?? 0) / 100) * 15)} points from five` +
+          `${r.formLong !== null ? `, against ${r.formLong}/100 over the longer run — ${(r.formLong ?? 0) > (r.form ?? 0) ? 'they are falling off' : 'they are picking up'}` : ''}. ` +
+          `These are form points, not league points: the save does not carry a season total.`,
       };
     };
     const formCell = (r) => {
