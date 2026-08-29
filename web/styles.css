@@ -1756,3 +1756,32 @@ td.dwellzone .dwellpad { border: 0; border-radius: 0; width: 14px; }
   font-size: 13px; color: var(--ink-dim); line-height: 1.5;
 }
 .chevent i { font-style: normal; }
+
+/* ============================================================ AI mode, and breathing room
+
+   The AI box wears its own colour so it reads as a mode alongside RPG, and its
+   switch is visibly out of reach until there is something behind it. */
+:root { --ai: #38bdf8; --ai-line: rgba(56, 189, 248, 0.38); --ai-bg: rgba(56, 189, 248, 0.09); }
+
+.aicard { border-color: var(--ai-line); background: linear-gradient(160deg, var(--panel), var(--ai-bg)); }
+.aicard h2 { color: var(--ai); }
+.aicard h2::after { background: linear-gradient(90deg, var(--ai-line), transparent); }
+.statuspill {
+  order: 0; font-size: 9.5px; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 800;
+  color: var(--ai); background: var(--ai-bg); border: 1px solid var(--ai-line);
+  border-radius: 999px; padding: 2px 9px;
+}
+.setrow.is-disabled { opacity: 0.62; }
+.switch.off-limits { cursor: not-allowed; opacity: 0.5; }
+.switch.off-limits:hover { border-color: var(--line); }
+
+/* The Contract was flush against the mode boxes above it. */
+.setgrid { margin-bottom: 14px; }
+main > .panel + .panel { margin-top: 14px; }
+
+/* ============================================================ chronicle entries */
+.chevent { grid-template-columns: 18px 1fr auto; }
+.chbody { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.chbody b { color: var(--ink); font-weight: 650; }
+.chdetail { font-size: 11.5px; color: var(--ink-faint); }
+.chwhen { font-size: 10.5px; color: var(--ink-faint); font-weight: 650; white-space: nowrap; }

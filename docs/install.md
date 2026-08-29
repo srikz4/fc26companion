@@ -49,9 +49,18 @@ From then on it is one double-click: if the server is already running it just op
 ## Where things live
 
 - **Save files** are read from `%LOCALAPPDATA%\EA SPORTS FC 26\settings\` — found automatically.
-- **History** (snapshots of every save it has seen) lives in `store\` inside the app folder.
-  Delete it and Companion rebuilds from the next save, losing season-trend history.
+- **History** lives in `store\history.sqlite` inside the app folder: a snapshot of every save it
+  has seen, plus the **story ledger** of what happened and when it was first seen. Delete it and
+  Companion rebuilds from the next save, losing season-trend history and every dated event.
+- **Snapshots** (byte-for-byte copies of each save it parsed) live in `snapshots\`.
 - Companion **never writes** to the game's folders.
+
+## History, and why it starts today
+
+Companion can only witness what it is running for. The first time it reads a save it records the
+career's own record — past seasons, trophies, the record scorelines — but those carry no date,
+because the save does not hold one. Everything from that point on is dated the day it was first
+seen and never rewritten. Leave it running as you play and the Chronicle fills in properly.
 
 ## Moving to a new PC and keeping history
 

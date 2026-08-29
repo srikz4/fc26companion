@@ -2,11 +2,34 @@
 
 A read-only second screen for **EA SPORTS FC 26 Manager Career** on PC. It watches your career
 save, parses it the moment the game writes it, and turns it into the screens the game doesn't
-give you: position fit, ceiling tracking, synergy math, transfer and wage guidance, loan
-monitoring, and a shareable career report — on your PC or on your phone over your own Wi-Fi.
+give you — on your PC or on your phone over your own Wi-Fi.
 
 Everything on screen is read from **your** save file. Nothing is invented: a fact the save
 doesn't hold renders as unknown, never as a guess.
+
+## What it gives you
+
+The navigation mirrors the game's own menu — Central, Squad, Transfers, Academy, Office, Story,
+Customise — and adds what the game keeps to itself:
+
+- **Position fit** for every player in every slot, fitted on your save's own world and anchored so
+  a player's rating in his own position matches the game exactly.
+- **Ceiling tracking** across snapshots — potential moves during a career, and Companion shows when
+  it moves, up or down.
+- **A live league table**, treatment room with recovery times and computed stand-ins, transfer
+  windows, and the world's transfer feed.
+- **Valuations**: an EA-style fair value with a walk-away floor and a negotiation ceiling, plus what
+  your world's own completed deals have actually paid.
+- **Wage and contract guidance** for every player with a recorded wage, with two package shapes and
+  the longest term the game will accept at that age.
+- **Synergy** — who supplies whom and how strongly, from attributes and PlayStyles.
+- **Scouting**: your scouts, their missions, and a sign / watch / pass verdict on every prospect a
+  report delivers.
+- **A story ledger.** Trophies, finishes, record scorelines, transfers, promotions and rating
+  milestones are recorded the first time they are seen and never rewritten, so the **Chronicle**
+  reads as history rather than a recomputed present.
+- **RPG mode** — the career as a campaign, with missions appearing in the view where the work is.
+- **A shareable career card**, built from your save.
 
 ## Quick start
 
@@ -24,6 +47,9 @@ page; phone addresses are printed in the server window. Save in game and the pag
   `Companion.vbs --local` turns it off).
 - **Real data only.** Every number traces to a field in your save or to arithmetic over them.
   Models (position fit, fees) are fitted on your save's own world and refuse to extrapolate.
+  Derived figures wear a `~` and never drive a recommendation.
+- **No pretending.** A feature with nothing behind it says so rather than shipping a plausible
+  placeholder — AI mode is switched off and marked unavailable for exactly that reason.
 
 ## Disclaimers
 

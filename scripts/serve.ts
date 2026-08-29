@@ -21,6 +21,7 @@ import { listManagerCareerSaves, resolveSaveDirectory } from '../src/core/saveLo
 import { createNameResolver, loadNameTable } from '../src/names/nameTable.ts';
 import { deriveNameIds } from '../src/names/deriveNameTable.ts';
 import { buildViewDocument, type ViewDocument } from '../src/engine/viewModel.ts';
+import { deriveStoryEvents } from '../src/engine/story.ts';
 import { ViewServer } from '../src/server/server.ts';
 import { loadNations } from '../src/domain/nations.ts';
 import { readFileSync as readFs, existsSync as existsFs } from 'node:fs';
@@ -80,6 +81,10 @@ async function main(): Promise<void> {
   let view: ViewDocument | null = null;
   let activeCareerId: number | undefined;
   let rebuilding = false;
+  // What the academy and the ratings looked like last time we rebuilt, so a
+  // promotion or a milestone can be seen as a change rather than a state.
+  let previousAcademyIds: Set<number> | undefined;
+  let previousOverall: Map<number, number> | undefined;
 
   /** Reparse the newest save and rebuild the document the page reads. */
   const rebuild = (): void => {
@@ -122,6 +127,59 @@ async function main(): Promise<void> {
         competitions,
         shortlist,
       });
+
+      // The ledger, written once per thing that happened.
+      if (activeCareerId !== undefined) {
+        const snapshotId = store.latestSnapshot(activeCareerId);
+        if (snapshotId !== null) {
+          const seniorIds = new Set(view.senior.map((p) => p.playerId));
+          const academyIds = new Set(view.academy.map((p) => p.playerId));
+          const overallById = new Map<number, number>();
+          for (const p of [...view.senior, ...view.academy]) {
+            if (p.overall !== null) overallById.set(p.playerId, p.overall);
+          }
+          const teamNameOf = (id: number): string | null => {
+            const row = (tables['teams'] ?? []).find((t) => t['teamid'] === id);
+            const nm = row?.['teamname'];
+            return typeof nm === 'string' ? nm : null;
+          };
+          const derived = deriveStoryEvents({
+              tables,
+              careerId: activeCareerId,
+              snapshotId,
+              gameDate: view.gameDate,
+              season: view.season,
+              nameOf: (id) => resolver.resolve(id).display,
+              teamNameOf,
+              competitionOf: (code) => competitions.get(code) ?? null,
+              seniorIds,
+              academyIds,
+              overallOf: (id) => overallById.get(id) ?? null,
+              previousAcademyIds,
+              previousOverall,
+          });
+          const written = store.recordStory(derived);
+          // Dates never move; classification is allowed to be corrected.
+          const fixed = store.reclassifyStory(derived);
+          if (written) console.log(`story ${written} new event${written === 1 ? '' : 's'} recorded`);
+          if (fixed) console.log(`story ${fixed} event${fixed === 1 ? '' : 's'} reclassified`);
+          previousAcademyIds = academyIds;
+          previousOverall = overallById;
+          // Rebuild so the page sees the events we just wrote.
+          if (written || fixed) {
+            view = buildViewDocument({
+              tables,
+              resolver,
+              store,
+              careerId: activeCareerId,
+              nameTableSize: names.byPlayerId.size,
+              nations,
+              competitions,
+              shortlist,
+            });
+          }
+        }
+      }
 
       console.log(
         `view  ${view.club.name ?? '?'} · ${view.senior.length} senior, ${view.academy.length} academy · ` +

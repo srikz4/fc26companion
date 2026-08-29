@@ -39,7 +39,7 @@ const SETTING_DEFS = [
   { key: 'compact', group: 'Preferences', label: 'Compact density', note: 'Tighter paddings and smaller type everywhere — more career per screen.', on: false },
   { key: 'fullMoney', group: 'Preferences', label: 'Full money figures', note: 'Show 12,500,000 instead of 12.5M wherever money appears shortened.', on: false },
   { key: 'rpg', group: 'Modes', label: 'RPG mode', note: 'Career-as-campaign: live challenges computed from your save, with progress. Deterministic — every number is real.', on: false },
-  { key: 'ai', group: 'Modes', label: 'AI mode', note: 'AI narration and insights on top of the recorded facts. Needs a local model or an API key; until one is configured this shows its setup status.', on: false },
+  { key: 'ai', group: 'Modes', label: 'AI mode', note: 'Narration and insight on top of the recorded facts. Nothing is wired yet — no provider, no key, no prompt — so the switch stays off rather than pretending. It turns on when there is something behind it.', on: false, disabled: true },
 ];
 /** Landing tab: where a fresh open of Companion starts. */
 const LANDING_CHOICES = ['central', 'squad', 'transfers', 'academy', 'office', 'story'];
@@ -4132,9 +4132,9 @@ function renderStory(doc) {
   cap.appendChild(el('p', 'muted tiny', 'What “Copy caption” puts on your clipboard — paste it next to the image.'));
   side.appendChild(cap);
 
-  if (settings.ai) {
+  if (false && settings.ai) {
     const ai = el('div', 'panel');
-    ai.appendChild(el('h2', null, '✨ AI mode'));
+    ai.appendChild(el('h2', null, 'AI mode'));
     ai.appendChild(
       el('p', 'muted', 'Switched on, not yet wired: AI narration needs a language-model provider — a local one (Ollama / LM Studio) or an API key. Nothing here fakes it in the meantime; the deterministic app is complete without it.'),
     );
@@ -4835,8 +4835,12 @@ function renderChronicle(doc) {
         ['Chapters', seasons.length],
         ['Trophies', trophies || null],
         ['Record', totals.w + totals.d + totals.l ? `${totals.w}-${totals.d}-${totals.l}` : null],
+        ['Recorded', (doc.story ?? []).length || null, 'Events in the ledger — each written the first time it was seen, and never rewritten.'],
         ['Manager', doc.manager],
       ]),
+    );
+    hero.appendChild(
+      el('p', 'muted tiny', 'The ledger records what happened and when Companion first saw it: trophies, finishes, record scorelines, the transfer business, promotions out of the academy, and players crossing 80, 85 and 90. History starts the day the watcher does — earlier seasons are read from the save\u2019s own record and carry no date.'),
     );
     frag.appendChild(hero);
   }
@@ -4872,24 +4876,48 @@ function renderChronicle(doc) {
     if (sn.goalsFor !== null) stat('Goals', `${sn.goalsFor}:${sn.goalsAgainst}`);
     chapter.appendChild(line);
 
-    const events = [];
-    for (const name of compsBySeason.get(sn.season) ?? []) events.push(['🏆', `Won the ${name}.`]);
-    if (sn.leagueTrophies) events.push(['🏆', `League champions${sn.leagueTrophies > 1 ? ` ×${sn.leagueTrophies}` : ''}.`]);
-    if (sn.bigBuy) events.push(['🖊', `Signed ${sn.bigBuy.name} for ${moneyShort(sn.bigBuy.amount)}.`]);
-    if (sn.bigSell) events.push(['💰', `Sold ${sn.bigSell.name} for ${moneyShort(sn.bigSell.amount)}.`]);
-    if (doc.board?.bigWin && String(doc.board.bigWin.date).startsWith(String(2024 + sn.season))) {
-      events.push(['💥', `${doc.board.bigWin.userScore}–${doc.board.bigWin.oppScore} against ${doc.board.bigWin.opponent}.`]);
+    // The ledger is the source: dated entries written the first time each thing
+    // was seen. What it has not witnessed yet is filled from the season record,
+    // undated and marked as such, rather than pretending to a date.
+    const ICON = {
+      trophy: '🏆', season: '📅', signing: '🖊', sale: '💰',
+      'record-win': '💥', 'record-loss': '🩹', promotion: '🎓', milestone: '📈',
+    };
+    // A date is shown only when it belongs to the season it is filed under.
+    // Everything already in the save when the watcher started was stamped with
+    // the day we first read it, and dating season one with today's date would
+    // be a lie dressed as history.
+    const seasonOfDate = (ymd) => {
+      if (!ymd || !doc.gameDate || doc.season === null) return null;
+      const yearOf = (d) => (Math.floor((d % 10000) / 100) >= 7 ? Math.floor(d / 10000) : Math.floor(d / 10000) - 1);
+      return doc.season - (yearOf(doc.gameDate) - yearOf(ymd));
+    };
+    const ledger = (doc.story ?? []).filter((e) => e.season === sn.season && e.kind !== 'season');
+    const events = ledger.map((e) => [
+      ICON[e.kind] ?? '·',
+      e.title,
+      e.detail,
+      seasonOfDate(e.gameDate) === e.season ? e.gameDate : null,
+    ]);
+    if (!ledger.length) {
+      for (const name of compsBySeason.get(sn.season) ?? []) events.push(['🏆', `Won the ${name}`, null, null]);
+      if (sn.bigBuy) events.push(['🖊', `Signed ${sn.bigBuy.name}`, moneyShort(sn.bigBuy.amount), null]);
+      if (sn.bigSell) events.push(['💰', `Sold ${sn.bigSell.name}`, moneyShort(sn.bigSell.amount), null]);
     }
     if (live) {
       const pace = sn.played ? Math.round(((sn.points ?? 0) / sn.played) * 38) : null;
-      if (pace !== null) events.push(['📈', `${sn.played} played, on a ${pace}-point pace.`]);
+      if (pace !== null) events.push(['📈', `${sn.played} played, on a ${pace}-point pace`, null, null]);
     }
     if (events.length) {
       const list = el('div', 'chevents');
-      for (const [icon, text] of events) {
+      for (const [icon, text, detail, when] of events) {
         const row = el('div', 'chevent');
         row.appendChild(el('i', null, icon));
-        row.append(text);
+        const body = el('span', 'chbody');
+        body.appendChild(el('b', null, text));
+        if (detail) body.appendChild(el('span', 'chdetail', detail));
+        row.appendChild(body);
+        if (when) row.appendChild(el('span', 'chwhen', fmtDate(when)));
         list.appendChild(row);
       }
       chapter.appendChild(list);
@@ -4956,17 +4984,24 @@ function renderSettings() {
   // so each gets its own box.
   const groups = [...new Set(SETTING_DEFS.map((d) => (d.group === 'Modes' ? d.label : d.group)))];
   for (const g of groups) {
-    const card = el('div', `panel${g.includes('RPG') ? ' modecard rpgcard' : g.includes('AI') ? ' modecard' : ''}`);
-    card.appendChild(el('h2', null, g));
+    const card = el('div', `panel${g.includes('RPG') ? ' modecard rpgcard' : g.includes('AI') ? ' modecard aicard' : ''}`);
+    const heading = el('h2', null, g);
+    if (g.includes('AI')) heading.appendChild(el('span', 'statuspill', 'Not available yet'));
+    card.appendChild(heading);
     for (const def of SETTING_DEFS.filter((d) => (d.group === 'Modes' ? d.label : d.group) === g)) {
-      const row = el('div', 'setrow');
-      const sw = el('button', `switch${settings[def.key] ? ' on' : ''}`);
+      const row = el('div', `setrow${def.disabled ? ' is-disabled' : ''}`);
+      const sw = el('button', `switch${settings[def.key] && !def.disabled ? ' on' : ''}${def.disabled ? ' off-limits' : ''}`);
       sw.appendChild(el('i', 'knob'));
-      activatable(sw, () => {
-        settings[def.key] = !settings[def.key];
-        saveSettings();
-        render();
-      });
+      if (def.disabled) {
+        sw.disabled = true;
+        sw.dataset.tip = 'Nothing is wired behind this yet — it turns on when there is.';
+      } else {
+        activatable(sw, () => {
+          settings[def.key] = !settings[def.key];
+          saveSettings();
+          render();
+        });
+      }
       row.appendChild(sw);
       const txt = el('div', 'settext');
       txt.appendChild(el('b', null, def.label));
@@ -4995,11 +5030,7 @@ function renderSettings() {
           txt.appendChild(lchips);
         }
       }
-      if (def.key === 'ai' && settings.ai) {
-        txt.appendChild(
-          el('p', 'muted tiny', 'Status: not wired yet. The AI layer (docs/ai-features.md) needs a local model or an API key before it can say anything — until then this switch only reserves the seat.'),
-        );
-      }
+
       row.appendChild(txt);
       card.appendChild(row);
     }

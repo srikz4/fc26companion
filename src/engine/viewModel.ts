@@ -408,6 +408,20 @@ export interface ViewDocument {
     wage: number | null;
     ea: EaValueBand | null;
   }[];
+  /**
+   * The story ledger: what happened and when we first saw it, newest first.
+   * Empty until the store has watched a save or two — history cannot be
+   * back-filled from a single file, and pretending otherwise would date every
+   * event to today.
+   */
+  story: {
+    key: string;
+    kind: string;
+    season: number | null;
+    title: string;
+    detail: string | null;
+    gameDate: number | null;
+  }[];
   /** The transfer shortlist exactly as the game saved it (career blob `mssm`). */
   shortlistIngame: {
     readable: boolean;
@@ -2030,6 +2044,17 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     shortlistIngame,
     academyReports,
     scoutProfiles,
+    story:
+      input.store && input.careerId !== undefined
+        ? input.store.story(input.careerId).map((e) => ({
+            key: e.key,
+            kind: e.kind,
+            season: e.season,
+            title: e.title,
+            detail: e.detail,
+            gameDate: e.gameDate,
+          }))
+        : [],
     warnings,
   };
 }
