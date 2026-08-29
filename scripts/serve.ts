@@ -16,7 +16,9 @@ import { loadDbMeta } from '../src/parser/meta.ts';
 import { parseSave, type Tables } from '../src/parser/dbReader.ts';
 import { readShortlist } from '../src/parser/careerBlob.ts';
 import { readFixtureLedger, readLatestResults } from '../src/parser/fixtures.ts';
-import { anchorSlots } from '../src/engine/standings.ts';
+import { anchorSlots, compForLeague, completeByElimination } from '../src/engine/standings.ts';
+import { cascadeSlots, pairingsFromLineups } from '../src/engine/pairings.ts';
+import type { SlotFixture } from '../src/parser/fixtures.ts';
 import { HistoryStore, readCareerIdentity } from '../src/store/store.ts';
 import { SaveWatcher } from '../src/watcher/watcher.ts';
 import { listManagerCareerSaves, resolveSaveDirectory } from '../src/core/saveLocation.ts';
@@ -51,6 +53,16 @@ function lanAddresses(): string[] {
     }
   }
   return out;
+}
+
+/** The matchday a save was written after: its latest played fixture. */
+function latestPlayedDate(fixtures: SlotFixture[]): number | null {
+  let latest: number | null = null;
+  for (const f of fixtures) {
+    if (f.goalsA === null || f.goalsB === null) continue;
+    if (latest === null || f.date > latest) latest = f.date;
+  }
+  return latest;
 }
 
 function argPort(): number {
@@ -113,11 +125,24 @@ async function main(): Promise<void> {
       // The fixture ledger: the save's own record of what has been played.
       // `leagueteamlinks` does not keep the user's league table live; this does.
       const leagueOfTeam = new Map<number, number>();
+      const leagueClubs = new Map<number, number[]>();
       for (const l of tables['leagueteamlinks'] ?? []) {
         const t = l['teamid'];
         const lg = l['leagueid'];
-        if (typeof t === 'number' && typeof lg === 'number') leagueOfTeam.set(t, lg);
+        if (typeof t !== 'number' || typeof lg !== 'number') continue;
+        leagueOfTeam.set(t, lg);
+        if (!leagueClubs.has(lg)) leagueClubs.set(lg, []);
+        leagueClubs.get(lg)!.push(t);
       }
+      const clubsInLeague = (lg: number): number[] => leagueClubs.get(lg) ?? [];
+      const leagueSize = (lg: number): number | null => leagueClubs.get(lg)?.length ?? null;
+      const clubTeamId = (() => {
+        for (const t of ['career_managerinfo', 'career_users'] as const) {
+          const v = (tables[t] ?? [])[0]?.['clubteamid'];
+          if (typeof v === 'number') return v;
+        }
+        return null;
+      })();
       const fixtures = readFixtureLedger(bytesAll[0]!);
       const roundResults = fixtures
         ? (readLatestResults(bytesAll[0]!, (id) => leagueOfTeam.get(id) ?? null, (id) => playerIds.has(id)) ?? [])
@@ -135,19 +160,52 @@ async function main(): Promise<void> {
       /**
        * Which club sits in which fixture slot.
        *
-       * Each matchday's round-up names a handful of slots outright; the rest
-       * stay anonymous until a later round names them. Remembering the ones we
-       * have proved means the table fills in as the season goes rather than
-       * resetting to what this single save happens to show.
+       * Two sources, both read from the save. The results round-up names a few
+       * slots outright, when it covers your league at all. The lineup table says
+       * who played whom in the latest round, which — against the calendar —
+       * names whoever an already-named club just faced. Both accumulate in the
+       * store, so a division that starts anonymous fills in as you play.
        */
-      let anchors = fixtures ? anchorSlots(fixtures, roundResults) : [];
       // Slots are reshuffled when a season regenerates the fixture list, so what
       // we learned last season must not be applied to this one.
       const seasonCount = (tables['career_users'] ?? [])[0]?.['seasoncount'];
       const season = typeof seasonCount === 'number' ? seasonCount : null;
+      const ourLeague = clubTeamId === null ? null : (leagueOfTeam.get(clubTeamId) ?? null);
+      let anchors = fixtures ? anchorSlots(fixtures, roundResults, { leagueSize }) : [];
+
       if (fixtures && activeCareerId !== undefined && season !== null) {
         store.recordSlotNames(activeCareerId, season, anchors);
+        if (ourLeague !== null) {
+          const round = latestPlayedDate(fixtures);
+          if (round !== null) {
+            store.recordPairings(
+              activeCareerId,
+              season,
+              ourLeague,
+              pairingsFromLineups(
+                tables['career_playerlastmatchhistory'] ?? [],
+                (id) => leagueOfTeam.get(id) ?? null,
+                ourLeague,
+                clubsInLeague(ourLeague),
+              ).map(([teamA, teamB]) => ({ date: round, teamA, teamB })),
+            );
+          }
+        }
         anchors = store.slotNames(activeCareerId, season);
+
+        // Everything the stored pairings can still resolve.
+        if (ourLeague !== null) {
+          const comp = compForLeague(anchors, (id) => leagueOfTeam.get(id) ?? null, ourLeague);
+          if (comp !== null) {
+            const grown = cascadeSlots(fixtures, comp, anchors, store.pairings(activeCareerId, season, ourLeague));
+            if (grown.contradictions) {
+              console.log(`slots ${grown.contradictions} pairing(s) disagreed with a known club and were dropped`);
+            }
+            anchors = completeByElimination(fixtures, comp, grown.anchors, clubsInLeague(ourLeague));
+            store.recordSlotNames(activeCareerId, season, anchors);
+            anchors = store.slotNames(activeCareerId, season);
+          }
+        }
       }
 
       view = buildViewDocument({

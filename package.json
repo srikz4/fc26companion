@@ -34,6 +34,7 @@
     "watch": "tsx scripts/watch.ts",
     "serve": "tsx scripts/serve.ts",
     "import:faces": "tsx scripts/importFaces.ts",
+    "backfill:fixtures": "tsx scripts/backfillFixtures.ts",
     "experiment:baseline": "tsx scripts/decodeExperiment.ts baseline",
     "experiment:diff": "tsx scripts/decodeExperiment.ts diff"
   },

@@ -290,6 +290,8 @@ export interface ViewDocument {
       form: number | null;
       formLong: number | null;
       form5: ('W' | 'D' | 'L')[];
+      /** The unbroken run they are on, over the whole season. */
+      streak: { kind: 'W' | 'D' | 'L'; length: number } | null;
       lastResult: number | null;
       played: number;
       wins: number;
@@ -1604,6 +1606,11 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
          * club in the division.
          */
         form5: formResults(num(l, 'teamform')),
+        /**
+         * No streak from this source: `teamform` is only five matches deep, so
+         * a run five long cannot be told from one twelve long.
+         */
+        streak: null as { kind: 'W' | 'D' | 'L'; length: number } | null,
         /** 0 win, 1 draw, 2 loss — note the inversion against teamform. */
         lastResult: num(l, 'lastgameresult'),
         played,
@@ -1668,6 +1675,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
             // Straight from the results, so this is league form — unlike
             // `teamform`, which mixes in cups and friendlies.
             form5: r.form,
+            streak: r.streak,
             lastResult: link ? num(link, 'lastgameresult') : null,
             played: r.played,
             wins: r.won,

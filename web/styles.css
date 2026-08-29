@@ -1352,6 +1352,43 @@ td.res.r-w { color: var(--up); }
 td.res.r-d { color: var(--ink-dim); }
 td.res.r-l { color: var(--down); }
 
+/*
+ * The league table carries thirteen columns. Everything after the club name is
+ * a small number, so it can run much tighter than the app's default cell and
+ * still be comfortable to read — which is what keeps the form and the last five
+ * on screen rather than behind a horizontal scroll.
+ */
+.ltable table.tight td,
+.ltable table.tight th { padding-left: 5px; padding-right: 5px; }
+.ltable .formcell { min-width: 56px; grid-template-columns: minmax(24px, 1fr) 1.8em; gap: 5px; }
+.ltable .formcell b { font-size: 11px; }
+.ltable .formrun { gap: 2px; }
+.ltable .fpip { width: 15px; height: 15px; border-radius: 3px; font-size: 9px; }
+
+/*
+ * A run of results, marked against the number it is made of.
+ *
+ * Three in a row is a spark and five is the full thing, so the same glance
+ * tells you both that a club is on a run and roughly how deep it is. The mark
+ * sits beside the figure rather than replacing it — the count is still the
+ * fact, this is only the emphasis.
+ */
+.streaknum { display: inline-flex; align-items: center; gap: 4px; justify-content: flex-end; }
+.streaknum b { font-variant-numeric: tabular-nums; font-weight: 700; }
+.streak { display: inline-flex; line-height: 0; }
+.streak .ico { width: 13px; height: 13px; }
+.streak.spark { opacity: 0.62; }
+.streak.spark .ico { stroke-width: 1.9; }
+.streak.blaze .ico { stroke-width: 2.4; }
+.streak.hot { color: #f59e0b; }
+.streak.hot.blaze { color: #f97316; filter: drop-shadow(0 0 4px rgb(249 115 22 / 0.55)); }
+.streak.cold { color: #60a5fa; }
+.streak.cold.blaze { color: #38bdf8; filter: drop-shadow(0 0 4px rgb(56 189 248 / 0.55)); }
+.streak.flat { color: var(--ink-faint); }
+.streak.flat.blaze { color: var(--ink-dim); }
+:root[data-theme='light'] .streak.hot { color: #b45309; }
+:root[data-theme='light'] .streak.cold { color: #1d4ed8; }
+
 /* One line of the European round-up: home, score, away. */
 .euro {
   display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);

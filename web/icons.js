@@ -60,6 +60,13 @@ const PATHS = {
   clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M12 6v6l4 2',
   check: 'm20 6-11 11-5-5',
   info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M12 16v-4M12 8h.01',
+
+  // form streaks: hot, cold, and going nowhere
+  flame:
+    'M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5',
+  snowflake:
+    'm10 20-1.25-2.5L6 18M10 4 8.75 6.5 6 6M14 20l1.25-2.5L18 18M14 4l1.25 2.5L18 6M17 21l-3-6h-4l-3 6M17 3l-3 6h-4L7 3M2 12h20M20 9l-2 3 2 3M4 9l2 3-2 3',
+  equal: 'M5 9h14M5 15h14',
 };
 
 /** An icon as an inline SVG element, inheriting the current text colour. */

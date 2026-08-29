@@ -83,3 +83,8 @@ Delete the folder. Nothing is installed anywhere else — no registry entries, n
 - **Phone can't connect** — same Wi-Fi? Launcher run without `--local`? Check the firewall
   allowed Node on private networks.
 - **Faces are initials** — run `npm run import:faces` once, then refresh.
+- **League table rows say "not yet named"** — the save files fixtures by slot rather than by club,
+  and a slot is named only when a save proves whose it is. Run `npm run backfill:fixtures` to read
+  those proofs out of every save already archived; one season's worth usually names a whole
+  division. Add `--reset` to work the names out again from scratch. It touches nothing else — the
+  names are derived, so they can always be re-derived.

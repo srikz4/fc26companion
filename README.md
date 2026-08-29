@@ -17,8 +17,10 @@ Customise — and adds what the game keeps to itself:
 - **Ceiling tracking** across snapshots — potential moves during a career, and Companion shows when
   it moves, up or down.
 - **A live league table and your full fixture list**, added up from the save's own record of every
-  match played — played, won, drawn, lost, goals, points, league form, and every remaining fixture
-  with its date and kick-off. Plus the matchday round-up from the rest of Europe.
+  match played — played, won, drawn, lost, goals, points, form, the last five results newest first,
+  and every remaining fixture with its date and kick-off. A club three deep in wins is marked, and
+  five deep is marked harder; the same for defeats and for draws. Plus the matchday round-up from
+  the rest of Europe.
 - **Treatment room** with recovery times and computed stand-ins, transfer windows, and the world's
   transfer feed.
 - **Valuations**: an EA-style fair value with a walk-away floor and a negotiation ceiling, plus what

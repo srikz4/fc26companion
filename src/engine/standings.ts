@@ -31,8 +31,14 @@ export interface Standing {
   goalsAgainst: number;
   goalDifference: number;
   points: number;
-  /** Most recent last, as the game shows it. */
+  /** Most recent last. The table reverses it for display. */
   form: Result[];
+  /**
+   * The run they are on right now, over the whole season rather than the last
+   * five — a club six wins deep is a different story from one on three, and the
+   * five-match window cannot tell them apart.
+   */
+  streak: { kind: Result; length: number } | null;
 }
 
 /** A slot named by a result we actually read. */
@@ -40,11 +46,35 @@ export interface SlotAnchor {
   comp: number;
   slot: number;
   teamId: number;
-  /** The date of the result that named it, for provenance. */
-  namedOn: number;
+  /**
+   * The date of the result that named it, for provenance. Null when the slot
+   * was the last one left and its club was deduced rather than observed.
+   */
+  namedOn: number | null;
+}
+
+export interface AnchorOptions {
+  /**
+   * How many clubs a league has.
+   *
+   * Without this, a result can bind into the wrong competition: a Ligue 1
+   * scoreline that happens to be unique on the day will attach itself to an
+   * English fixture and put Marseille in the Premier League. A group of the
+   * wrong size cannot be that league, which rules it out before it can.
+   */
+  leagueSize?: (leagueId: number) => number | null;
 }
 
 const played = (f: SlotFixture): boolean => f.goalsA !== null && f.goalsB !== null;
+
+/** The unbroken run a club is on, counting back from their latest match. */
+export function currentStreak(form: Result[]): { kind: Result; length: number } | null {
+  const kind = form.at(-1);
+  if (!kind) return null;
+  let length = 0;
+  for (let i = form.length - 1; i >= 0 && form[i] === kind; i--) length++;
+  return { kind, length };
+}
 
 /**
  * The slots that actually contest a competition.
@@ -84,10 +114,22 @@ export function competitionSlots(fixtures: SlotFixture[], comp: number): number[
  * Anything still ambiguous when that settles stays unnamed. A wrong badge on a
  * true table would be worse than a missing one.
  */
-export function anchorSlots(fixtures: SlotFixture[], results: RoundResult[]): SlotAnchor[] {
+export function anchorSlots(
+  fixtures: SlotFixture[],
+  results: RoundResult[],
+  opts: AnchorOptions = {},
+): SlotAnchor[] {
   const bySlot = new Map<string, SlotAnchor>();
   const slotOfTeam = new Map<string, number>(); // `${comp}:${teamId}` -> slot
+  // A competition is one league and a league is one competition. Binding either
+  // way round binds both, and nothing may cross afterwards.
   const compOfLeague = new Map<number, number>();
+  const leagueOfComp = new Map<number, number>();
+
+  const sizeOf = new Map<number, number>();
+  for (const comp of new Set(fixtures.map((f) => f.comp))) {
+    sizeOf.set(comp, competitionSlots(fixtures, comp).length);
+  }
 
   const conflicts = (comp: number, slot: number, teamId: number): boolean => {
     const held = bySlot.get(`${comp}:${slot}`);
@@ -96,8 +138,18 @@ export function anchorSlots(fixtures: SlotFixture[], results: RoundResult[]): Sl
     return placed !== undefined && placed !== slot;
   };
 
+  const compFits = (comp: number, leagueId: number): boolean => {
+    const boundComp = compOfLeague.get(leagueId);
+    if (boundComp !== undefined && boundComp !== comp) return false;
+    const boundLeague = leagueOfComp.get(comp);
+    if (boundLeague !== undefined && boundLeague !== leagueId) return false;
+    const want = opts.leagueSize?.(leagueId) ?? null;
+    return want === null || sizeOf.get(comp) === want;
+  };
+
   const take = (r: RoundResult, f: SlotFixture): void => {
     compOfLeague.set(r.leagueId, f.comp);
+    leagueOfComp.set(f.comp, r.leagueId);
     for (const [slot, teamId] of [
       [f.slotA, r.homeTeamId],
       [f.slotB, r.awayTeamId],
@@ -112,7 +164,6 @@ export function anchorSlots(fixtures: SlotFixture[], results: RoundResult[]): Sl
     let named = 0;
     for (let i = pending.length - 1; i >= 0; i--) {
       const r = pending[i]!;
-      const comp = compOfLeague.get(r.leagueId) ?? null;
       const hits = fixtures.filter(
         (f) =>
           f.date === r.date &&
@@ -120,7 +171,7 @@ export function anchorSlots(fixtures: SlotFixture[], results: RoundResult[]): Sl
           f.goalsB === r.awayGoals &&
           f.slotA !== UNKNOWN_SLOT &&
           f.slotB !== UNKNOWN_SLOT &&
-          (comp === null || f.comp === comp) &&
+          compFits(f.comp, r.leagueId) &&
           !conflicts(f.comp, f.slotA, r.homeTeamId) &&
           !conflicts(f.comp, f.slotB, r.awayTeamId),
       );
@@ -133,6 +184,35 @@ export function anchorSlots(fixtures: SlotFixture[], results: RoundResult[]): Sl
   }
 
   return [...bySlot.values()];
+}
+
+/**
+ * Name the last slot when only one club is left for it.
+ *
+ * This is deduction, not a guess: if a group has exactly as many entrants as
+ * the league has clubs, and every entrant but one is already named, the one
+ * that is left has nowhere else to be. It applies only at the very end, and the
+ * anchor it produces carries a null date to say it was reasoned rather than
+ * read.
+ */
+export function completeByElimination(
+  fixtures: SlotFixture[],
+  comp: number,
+  anchors: SlotAnchor[],
+  clubsInLeague: number[],
+): SlotAnchor[] {
+  const entrants = competitionSlots(fixtures, comp);
+  if (entrants.length !== clubsInLeague.length) return anchors;
+
+  const named = new Map(anchors.filter((a) => a.comp === comp).map((a) => [a.slot, a.teamId]));
+  const missingSlots = entrants.filter((s) => !named.has(s));
+  if (missingSlots.length !== 1) return anchors;
+
+  const used = new Set(named.values());
+  const missingClubs = clubsInLeague.filter((id) => !used.has(id));
+  if (missingClubs.length !== 1) return anchors;
+
+  return [...anchors, { comp, slot: missingSlots[0]!, teamId: missingClubs[0]!, namedOn: null }];
 }
 
 /** Which competition group a league's fixtures live in, per the anchors we hold. */
@@ -170,6 +250,7 @@ export function buildStandings(
         goalDifference: 0,
         points: 0,
         form: [],
+        streak: null,
       };
       rows.set(slot, r);
     }
@@ -202,6 +283,7 @@ export function buildStandings(
   for (const r of table) {
     r.goalDifference = r.goalsFor - r.goalsAgainst;
     r.points = r.won * 3 + r.drawn;
+    r.streak = currentStreak(r.form);
     r.form = r.form.slice(-5);
   }
   table.sort((a, b) => b.points - a.points || b.goalDifference - a.goalDifference || b.goalsFor - a.goalsFor);

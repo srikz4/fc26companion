@@ -137,8 +137,10 @@ carries the explanation of where those numbers came from, for the moments you wa
 - When the game keeps something Companion cannot read, it says exactly that instead of showing
   something it cannot stand behind. The league table is the clearest case: the standings are added
   up from the save's own record of every match played, but the save files those matches by slot
-  rather than by club, and a slot is only named when a results round-up covers one of its games.
-  Rows that have not been named yet read **not yet named** and fill in as the season goes on.
+  rather than by club. A slot is named only when a save proves it — from the matchday round-up, or
+  from who a club you can already name just played. Rows nothing has named yet read
+  **not yet named**, and fill in as the season goes on. `npm run backfill:fixtures` reads the names
+  out of every save already archived, which usually completes a division in one go.
 
 ---
 

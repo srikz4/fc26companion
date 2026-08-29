@@ -130,6 +130,25 @@ CREATE TABLE IF NOT EXISTS fixture_slot (
   PRIMARY KEY (career_id, season, comp, slot)
 ) WITHOUT ROWID;
 
+-- Who played whom, one round at a time (engine/pairings.ts).
+--
+-- Every save says which clubs shared a match in the round it was written after,
+-- but says it only about that one round. Kept here, the rounds accumulate, and
+-- together with the calendar they name the slots the results round-up never
+-- covers. Storing the observation rather than the conclusion matters: a pairing
+-- that resolves nothing today resolves something the moment a neighbouring slot
+-- is named.
+CREATE TABLE IF NOT EXISTS round_pairing (
+  career_id   INTEGER NOT NULL REFERENCES career(career_id),
+  season      INTEGER NOT NULL,
+  league_id   INTEGER NOT NULL,
+  round_date  INTEGER NOT NULL,
+  team_a      INTEGER NOT NULL,
+  team_b      INTEGER NOT NULL,
+  observed_at TEXT NOT NULL,
+  PRIMARY KEY (career_id, season, league_id, round_date, team_a, team_b)
+) WITHOUT ROWID;
+
 -- Prefix-compressed name fields we could not decode, kept so the dictionary can
 -- be reconstructed later (spec.md §9 E-1). Diagnostic only; never displayed.
 CREATE TABLE IF NOT EXISTS name_fragment (

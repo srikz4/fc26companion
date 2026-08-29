@@ -17,6 +17,7 @@ import {
 } from './schema.ts';
 import type { ParseResult, Row, Tables } from '../parser/dbReader.ts';
 import type { SlotAnchor } from '../engine/standings.ts';
+import type { Pairing } from '../engine/pairings.ts';
 
 export const PARSER_VERSION = '0.1.0';
 
@@ -487,6 +488,54 @@ export class HistoryStore {
     });
     run(anchors);
     return written;
+  }
+
+  /**
+   * Remember who played whom in a round.
+   *
+   * Pairs are stored with the lower team id first so the same match observed
+   * from two different saves collides instead of duplicating.
+   */
+  recordPairings(careerId: number, season: number, leagueId: number, pairings: Pairing[]): number {
+    if (pairings.length === 0) return 0;
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO round_pairing
+         (career_id, season, league_id, round_date, team_a, team_b, observed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    let written = 0;
+    const now = new Date().toISOString();
+    const run = this.db.transaction((list: Pairing[]) => {
+      for (const p of list) {
+        const [a, b] = p.teamA <= p.teamB ? [p.teamA, p.teamB] : [p.teamB, p.teamA];
+        written += insert.run(careerId, season, leagueId, p.date, a, b, now).changes;
+      }
+    });
+    run(pairings);
+    return written;
+  }
+
+  /**
+   * Forget every slot name and pairing for a season.
+   *
+   * These rows are worked out from saves, not read from them, so they can
+   * always be worked out again -- and must be, whenever the reasoning behind
+   * them changes. Observations elsewhere in the store are never touched.
+   */
+  forgetFixtureLearning(careerId: number, season: number): number {
+    const a = this.db.prepare('DELETE FROM fixture_slot WHERE career_id = ? AND season = ?').run(careerId, season);
+    const b = this.db.prepare('DELETE FROM round_pairing WHERE career_id = ? AND season = ?').run(careerId, season);
+    return a.changes + b.changes;
+  }
+
+  /** Every pairing seen this season, for one league. */
+  pairings(careerId: number, season: number, leagueId: number): Pairing[] {
+    return this.db
+      .prepare(
+        `SELECT round_date AS date, team_a AS teamA, team_b AS teamB
+           FROM round_pairing WHERE career_id = ? AND season = ? AND league_id = ?`,
+      )
+      .all(careerId, season, leagueId) as Pairing[];
   }
 
   /** Every slot named so far this season. */

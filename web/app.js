@@ -4544,7 +4544,7 @@ function renderCentral(doc) {
   // record of a real team, we just cannot put a badge on it yet. Shared by the
   // table, the season list and anywhere else a slot surfaces.
   const UNNAMED_WHY =
-    'The save stores this fixture list by slot, not by club. A slot gets its name the first time a results round-up covers one of its matches, so this row will fill in as the season goes on.';
+    'The save stores this fixture list by slot, not by club. A slot is named when a save proves it — from the matchday round-up, or from who a club you can already name just played — so this row fills in as the season goes on. Run “npm run backfill:fixtures” to read the names out of saves you have already archived.';
 
   if (settings.leagueTable && doc.leagueTable?.rows?.length) {
     const lt = doc.leagueTable;
@@ -4554,44 +4554,85 @@ function renderCentral(doc) {
     // is the real table. 'links' is the fallback for when that cannot be read,
     // and for the user's own division it is usually last season's leftovers.
     const fromLedger = lt.source === 'fixtures';
+    // Points a five-match run is worth, which is what makes the bar and the
+    // pips agree instead of quietly measuring different things.
+    const runPoints = (form5) => (form5 ?? []).reduce((n, x) => n + (x === 'W' ? 3 : x === 'D' ? 1 : 0), 0);
+    // Newest on the left: reading a run should start with what just happened.
     const formRun = (r) => {
       if (!r.form5?.length) return { text: '—' };
+      const recentFirst = [...r.form5].reverse();
       const box2 = el('span', 'formrun');
-      r.form5.forEach((res, i) => {
-        box2.appendChild(el('i', `fpip f-${res.toLowerCase()}${i === r.form5.length - 1 ? ' newest' : ''}`, res));
+      recentFirst.forEach((res, i) => {
+        box2.appendChild(el('i', `fpip f-${res.toLowerCase()}${i === 0 ? ' newest' : ''}`, res));
       });
+      const pts = runPoints(r.form5);
       return {
         node: box2,
-        text: r.form5.join(''),
-        sort: r.form,
-        title: fromLedger
-          ? `Last five league matches, oldest first — ${r.form5.join(' ')}. Read off the results themselves, so this is the league alone: cups and friendlies are not in it.`
-          : `Last five matches in all competitions, oldest first — ${r.form5.join(' ')}. ` +
-            `That is ${Math.round(((r.form ?? 0) / 100) * 15)} points from five` +
-            `${r.formLong !== null ? `, against ${r.formLong}/100 over the longer run — ${(r.formLong ?? 0) > (r.form ?? 0) ? 'they are falling off' : 'they are picking up'}` : ''}.`,
+        text: recentFirst.join(''),
+        sort: pts,
+        title:
+          `Last five, most recent first — ${recentFirst.join(' ')}. That is ${pts} of a possible 15.` +
+          (fromLedger
+            ? ' Read off the results themselves, so this is the league alone: cups and friendlies are not in it.'
+            : ' From the club record in the save, which counts all competitions.'),
       };
     };
     const formCell = (r) => {
-      if (r.form === null) return { text: '—' };
+      // When the rows come from the results, score the form off those same five
+      // so the bar cannot contradict the pips beside it. The game's own rating
+      // still gets a mention, because it counts cups and this does not.
+      const pct = fromLedger && r.form5?.length ? Math.round((runPoints(r.form5) / 15) * 100) : r.form;
+      if (pct === null || pct === undefined) return { text: '—' };
       const box2 = el('span', 'formcell');
       const track = el('div', 'btrack');
-      const fill = el('div', `bfill ${r.form >= 66 ? 't3' : r.form >= 40 ? 't2' : 't1'}`);
-      fill.style.width = `${Math.max(3, Math.min(100, r.form))}%`;
+      const fill = el('div', `bfill ${pct >= 66 ? 't3' : pct >= 40 ? 't2' : 't1'}`);
+      fill.style.width = `${Math.max(3, Math.min(100, pct))}%`;
       track.appendChild(fill);
       box2.appendChild(track);
-      box2.appendChild(el('b', null, String(r.form)));
+      box2.appendChild(el('b', null, String(pct)));
       return {
         node: box2,
-        text: r.form,
+        text: pct,
         num: true,
-        sort: r.form,
-        title: `The game's own recent-form rating, 0–100${r.formLong !== null ? ` · ${r.formLong} over the longer run` : ''}.`,
+        sort: pct,
+        title: fromLedger
+          ? `${runPoints(r.form5)} points from the last five league matches, as a share of fifteen.` +
+            (r.form !== null ? ` The game’s own form rating, which counts every competition, reads ${r.form}.` : '')
+          : `The game's own recent-form rating, 0–100${r.formLong !== null ? ` · ${r.formLong} over the longer run` : ''}.`,
       };
     };
-    // The movement column is the insight the raw table hides: who is climbing
+
+    /**
+     * A run worth noticing, shown against the number it is made of.
+     *
+     * Three in a row is a spark; five is the thing itself. Wins burn, losses
+     * freeze, and a run of draws is a club going nowhere in particular.
+     */
+    const STREAK_LOOK = { W: ['flame', 'hot'], D: ['equal', 'flat'], L: ['snowflake', 'cold'] };
+    const streakCell = (r, kind, value) => {
+      const cell = { text: value, num: true, sort: value, cls: r.isUser ? 'you' : undefined };
+      const st = r.streak;
+      if (!st || st.kind !== kind || st.length < 3) return cell;
+      const [ico, tone] = STREAK_LOOK[kind];
+      const heat = st.length >= 5 ? 'blaze' : 'spark';
+      const wrap = el('span', 'streaknum');
+      wrap.appendChild(el('b', null, String(value)));
+      const mark = el('span', `streak ${tone} ${heat}`);
+      mark.appendChild(icon(ico, 13));
+      wrap.appendChild(mark);
+      const word = kind === 'W' ? 'wins' : kind === 'D' ? 'draws' : 'defeats';
+      return {
+        ...cell,
+        node: wrap,
+        title: `${st.length} ${word} in a row${st.length >= 5 ? ', and counting' : ''}.`,
+      };
+    };
+// The movement column is the insight the raw table hides: who is climbing
     // and who is falling relative to where they finished last season.
-    box.appendChild(
-      table(
+    // Thirteen columns is a lot of table. Scoping a class to it lets the number
+    // columns run tighter here than they would anywhere else, so the form and
+    // the last five fit beside the record instead of behind a scrollbar.
+    const grid = table(
         lt.started
           ? [
               { label: '#', num: true, always: true },
@@ -4605,6 +4646,8 @@ function renderCentral(doc) {
               { label: 'GA', num: true, always: true },
               { label: 'GD', num: true, always: true },
               { label: 'Pts', num: true, always: true },
+              { label: 'Form', num: true },
+              { label: 'Last 5' },
             ]
           : [
               { label: '', always: true },
@@ -4643,13 +4686,15 @@ function renderCentral(doc) {
                 moveCell,
                 nameCell,
                 { text: r.played, num: true, cls: you || undefined },
-                { text: r.wins, num: true, cls: you || undefined },
-                { text: r.draws, num: true, cls: you || undefined },
-                { text: r.losses, num: true, cls: you || undefined },
+                streakCell(r, 'W', r.wins),
+                streakCell(r, 'D', r.draws),
+                streakCell(r, 'L', r.losses),
                 { text: r.gf, num: true, cls: you || undefined },
                 { text: r.ga, num: true, cls: you || undefined },
                 { text: r.gd, num: true, cls: you || undefined },
                 { text: r.points, num: true, cls: you || undefined },
+                { ...formCell(r), cls: you || undefined },
+                { ...formRun(r), cls: you || undefined },
               ]
             : [
                 { text: '', cls: you || undefined },
@@ -4660,8 +4705,9 @@ function renderCentral(doc) {
               ];
         }),
         { tight: true },
-      ),
     );
+    grid.classList.add('ltable');
+    box.appendChild(grid);
     box.appendChild(
       el('p', 'muted tiny', !lt.started
         ? 'No league match has been played yet this season, so there is nothing to add up.'
