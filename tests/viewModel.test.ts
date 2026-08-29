@@ -127,12 +127,18 @@ describe('season growth', () => {
     assert.equal(shooting.attributes.find((a) => a.name === 'finishing')!.seasonDelta, null);
   });
 
-  test('goalkeepers get goalkeeper groups', () => {
+  test('goalkeepers lead with keeping and still carry the whole sheet', () => {
+    // The game prints every attribute on every card — a keeper has a Pace and
+    // a Shooting rating too — so the card shows all of them and simply leads
+    // with the ones that define him.
     const tables = save();
     tables['players'] = [{ playerid: 3, overallrating: 87, potential: 88, preferredposition1: 0, gkdiving: 85, gkreflexes: 89 }];
     tables['teamplayerlinks'] = [{ teamid: CLUB, playerid: 3, jerseynumber: 1, position: 0 }];
     const groups = build(tables).senior[0]!.groups.map((g) => g.name);
-    assert.deepEqual(groups, ['Diving', 'Handling', 'Kicking', 'Reflexes', 'Speed', 'Positioning']);
+    assert.deepEqual(groups.slice(0, 6), ['Diving', 'Handling', 'Kicking', 'Reflexes', 'Speed', 'Positioning']);
+    for (const outfield of ['Pace', 'Shooting', 'Passing', 'Dribbling', 'Defending', 'Physical']) {
+      assert.ok(groups.includes(outfield), `keeper is missing the ${outfield} group`);
+    }
   });
 });
 

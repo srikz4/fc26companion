@@ -1409,6 +1409,8 @@ function renderPitch(xi, diff, byId, nameOf) {
 function renderMatchday(doc) {
   const m = doc.matchday;
   const frag = document.createDocumentFragment();
+  const quests0 = questStrip(doc, 'squad/tactics');
+  if (quests0) frag.appendChild(quests0);
   const byId = new Map([...doc.senior, ...doc.academy].map((p) => [p.playerId, p]));
   const nameOf = (id) => byId.get(id)?.name ?? `#${id}`;
 
@@ -1589,9 +1591,8 @@ function renderMatchday(doc) {
 
     const side = el('div', 'pitch-side');
     const legend = el('div', 'pitch-legend');
-    legend.appendChild(el('span', null, 'The number is the rating in that slot'));
-    legend.appendChild(el('span', null, 'Amber card = we would pick someone else there'));
-    legend.appendChild(el('span', null, 'Positions come from the save’s own formation'));
+    legend.appendChild(el('span', null, 'Rating in that slot'));
+    legend.appendChild(el('span', 'lg-amber', 'Amber = we would pick someone else'));
     side.appendChild(legend);
 
     // The eleven as a list, for reading rather than scanning. Football order,
@@ -1605,7 +1606,7 @@ function renderMatchday(doc) {
             const p = byId.get(a.playerId);
             return [
               { text: codeShort(a.positionCode) ?? a.slot ?? '—', cls: 'posbadge' },
-              a.playerId === null ? '—' : nameOf(a.playerId),
+              p ? { node: playerNameCell(p), text: p.name, sort: p.name } : (a.playerId === null ? '—' : nameOf(a.playerId)),
               { text: a.fit ?? '—', num: true, tier: a.fit },
               { text: p?.overall ?? '—', num: true, tier: p?.overall },
               { text: a.headroom === null ? '—' : `+${a.headroom}`, num: true },
@@ -1615,17 +1616,71 @@ function renderMatchday(doc) {
         { tight: true },
       ),
     );
-    side.appendChild(
-      el(
-        'p',
-        'muted tiny',
-        `Bench and reserves: ${m.recommended.benched.length} available players not in this eleven.`,
-      ),
-    );
     top.appendChild(wrap);
     wrap.appendChild(side);
   }
   frag.appendChild(top);
+
+  // Who is left: the bench you would name, then everyone else. The old line
+  // said "12 available players not in this eleven" and left you to guess who.
+  {
+    const inXI = new Set((m.recommended?.assignments ?? []).map((a) => a.playerId));
+    const rest = doc.senior
+      .filter((p2) => !inXI.has(p2.playerId))
+      .sort((a, b) => (b.overall ?? 0) - (a.overall ?? 0));
+    const unavailable = new Set((m.unavailable ?? []).map((u) => u.playerId));
+    const available = rest.filter((p2) => !unavailable.has(p2.playerId));
+
+    // A bench covers the shape: a keeper, then the best available in each line.
+    const lineOf = (p2) => {
+      const sh = p2.positionShort ?? '';
+      if (sh === 'GK') return 'GK';
+      if (['CB', 'RB', 'LB', 'RWB', 'LWB'].includes(sh)) return 'DEF';
+      if (['CDM', 'CM', 'CAM', 'RM', 'LM'].includes(sh)) return 'MID';
+      return 'ATT';
+    };
+    const bench = [];
+    for (const line of ['GK', 'DEF', 'DEF', 'MID', 'MID', 'ATT', 'ATT']) {
+      const pick = available.find((p2) => !bench.includes(p2) && lineOf(p2) === line);
+      if (pick) bench.push(pick);
+    }
+    for (const p2 of available) {
+      if (bench.length >= 7) break;
+      if (!bench.includes(p2)) bench.push(p2);
+    }
+    const reserves = rest.filter((p2) => !bench.includes(p2));
+
+    const squadTable = (list2, note) =>
+      table(
+        [{ label: 'Pos', pos: true }, 'Player', { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Age', num: true }, { label: 'Mins', num: true }, 'Status'],
+        list2.map((p2) => [
+          { text: p2.positionShort ?? '—', cls: 'posbadge' },
+          { node: playerNameCell(p2), text: p2.name, sort: p2.name },
+          { text: p2.overall ?? '—', num: true, tier: p2.overall },
+          { text: p2.potential ?? '—', num: true, tier: p2.potential },
+          { text: p2.age ?? '—', num: true },
+          { text: p2.minutesThisSeason !== null ? `${p2.minutesThisSeason}'` : '—', num: true },
+          unavailable.has(p2.playerId)
+            ? { node: el('span', 'act urgent', (m.unavailable.find((u) => u.playerId === p2.playerId)?.reason ?? 'out').toUpperCase()), text: 'out' }
+            : note,
+        ]),
+        { tight: true },
+      );
+
+    if (bench.length) {
+      const panel = el('div', 'panel');
+      panel.appendChild(el('h2', null, `Bench — ${bench.length}`));
+      panel.appendChild(el('p', 'muted tiny', 'The seven that cover the shape: a keeper, then the best available in each line.'));
+      panel.appendChild(squadTable(bench, 'available'));
+      frag.appendChild(panel);
+    }
+    if (reserves.length) {
+      const panel = el('div', 'panel');
+      panel.appendChild(el('h2', null, `Reserves — ${reserves.length}`));
+      panel.appendChild(squadTable(reserves, ''));
+      frag.appendChild(panel);
+    }
+  }
 
   const changes = m.diff.filter((d) => d.savedPlayerId !== d.recommendedPlayerId && d.recommendedPlayerId !== null);
   const changePanel = el('div', 'panel');
@@ -2087,6 +2142,8 @@ function renderSynergy(doc) {
 
 function renderTransfers(doc) {
   const frag = document.createDocumentFragment();
+  const quests0 = questStrip(doc, 'transfers/targets');
+  if (quests0) frag.appendChild(quests0);
   const t = doc.transfers;
 
   const short = t.gaps.filter((g) => g.severity !== 'none');
@@ -2248,6 +2305,8 @@ function renderTransfers(doc) {
  */
 function renderWages(doc) {
   const frag = document.createDocumentFragment();
+  const quests0 = questStrip(doc, 'squad/wages');
+  if (quests0) frag.appendChild(quests0);
   const w = doc.wages;
   const renewalOf = new Map(w.renewals.map((r) => [r.playerId, r]));
   const assessOf = new Map(w.assessmentList.map((a) => [a.playerId, a]));
@@ -2612,6 +2671,8 @@ function renderLoans(doc) {
 
 function renderScouting(doc) {
   const frag = document.createDocumentFragment();
+  const quests0 = questStrip(doc, 'academy/players');
+  if (quests0) frag.appendChild(quests0);
 
   if (doc.scouts.length) {
     const panel = el('div', 'panel');
@@ -2863,6 +2924,15 @@ function renderStats(doc) {
  * roster), Stats, Attributes, Financial. Same players, different columns.
  */
 function renderSquadHub(doc) {
+  return renderSquadViews(doc, doc.senior, '👥 Squad');
+}
+
+/** The academy deserves the same four ways of reading a squad. */
+function renderAcademyHub(doc) {
+  return renderSquadViews(doc, doc.academy, '🎓 My academy');
+}
+
+function renderSquadViews(doc, source, title) {
   const frag = document.createDocumentFragment();
   const chips = el('div', 'chiprow hubmodes');
   for (const [id, label] of [['basic', 'Basic'], ['stats', 'Stats'], ['attributes', 'Attributes'], ['financial', 'Financial']]) {
@@ -2874,11 +2944,11 @@ function renderSquadHub(doc) {
 
   const mode = state.hubMode ?? 'basic';
   if (mode === 'basic') {
-    frag.appendChild(renderPlayers(doc.senior, { title: '👥 Squad' }));
+    frag.appendChild(renderPlayers(source, { title }));
     return frag;
   }
 
-  const list = applyFilters(doc.senior);
+  const list = applyFilters(source);
   // A selected row opens the card above the table, dressed for this view:
   // Stats shows the match log, Attributes the full sheet, Financial the money.
   if (state.hubSel && !list.some((p2) => p2.playerId === state.hubSel)) state.hubSel = null;
@@ -2916,8 +2986,14 @@ function renderSquadHub(doc) {
     );
     panel.appendChild(el('p', 'muted tiny', 'Rest on the dot at the row start, or tap anywhere, for his match log.'));
   } else if (mode === 'attributes') {
-    const sample = list.find((p) => p.positionShort !== 'GK') ?? list[0];
-    const groups = sample?.groups?.map((g) => g.name) ?? [];
+    // Columns are the groups every listed player has — keepers now carry the
+    // outfield groups too, so the intersection is the six shared ones and a
+    // keeper's row stops being a line of dashes.
+    const groups = list.length
+      ? list
+          .map((p) => p.groups.map((g) => g.name))
+          .reduce((acc, names) => acc.filter((n) => names.includes(n)))
+      : [];
     panel.appendChild(el('h2', null, '🧬 Attribute groups'));
     panel.appendChild(
       table(
@@ -3905,7 +3981,10 @@ function campaignMissions(doc) {
   const phase = seasonPhase(doc);
   const cur = doc.seasons[doc.seasons.length - 1];
   const out = [];
-  const push = (name, line, pct, done) => out.push({ name, line, pct: Math.max(0, Math.min(100, Math.round(pct))), done });
+  // `where` is the tab whose work the mission is about, so the quest can be
+  // shown next to the thing you would actually do about it.
+  const push = (name, line, pct, done, where = null) =>
+    out.push({ name, line, pct: Math.max(0, Math.min(100, Math.round(pct))), done, where });
   const ppg = cur && cur.played ? (cur.points ?? 0) / cur.played : null;
   const gapg = cur && cur.played ? cur.goalsAgainst / cur.played : null;
   const winRate = cur && cur.played ? cur.wins / cur.played : null;
@@ -3918,58 +3997,58 @@ function campaignMissions(doc) {
 
   const type = campaign.type;
   if (type === 'wall') {
-    if (gapg !== null) push('Keep the door shut', `Concede under 0.9 a game — at ${gapg.toFixed(2)}.`, (0.9 / Math.max(gapg, 0.01)) * 100, gapg <= 0.9);
+    if (gapg !== null) push('Keep the door shut', `Concede under 0.9 a game — at ${gapg.toFixed(2)}.`, (0.9 / Math.max(gapg, 0.01)) * 100, gapg <= 0.9, 'squad/tactics');
     if (windowOpen && gaps.some((g) => ['GK', 'CB', 'FB'].includes(g.slot)))
-      push('Fix the back line', `The window is open and ${gaps.filter((g) => ['GK', 'CB', 'FB'].includes(g.slot)).map((g) => g.slot).join('/')} is thin.`, 0, false);
-    else if (windowOpen) push('Hold the wall together', 'No defensive gap — resist the shiny signing.', 100, true);
+      push('Fix the back line', `The window is open and ${gaps.filter((g) => ['GK', 'CB', 'FB'].includes(g.slot)).map((g) => g.slot).join('/')} is thin.`, 0, false, 'transfers/targets');
+    else if (windowOpen) push('Hold the wall together', 'No defensive gap — resist the shiny signing.', 100, true, 'transfers/targets');
   } else if (type === 'academy') {
-    push('Academy minutes', `${(acadShare * 100).toFixed(1)}% of all minutes to academy products — target 15%.`, (acadShare / 0.15) * 100, acadShare >= 0.15);
+    push('Academy minutes', `${(acadShare * 100).toFixed(1)}% of all minutes to academy products — target 15%.`, (acadShare / 0.15) * 100, acadShare >= 0.15, 'squad/develop');
     const pending = doc.alerts.filter((a) => a.tag === 'Sign to senior').length;
-    if (pending) push('Promotions pending', `${pending} academy deal${pending > 1 ? 's' : ''} to convert before they walk.`, 0, false);
-    else push('Nobody slips away', 'Every promotion case is handled.', 100, true);
+    if (pending) push('Promotions pending', `${pending} academy deal${pending > 1 ? 's' : ''} to convert before they walk.`, 0, false, 'academy/players');
+    else push('Nobody slips away', 'Every promotion case is handled.', 100, true, 'academy/players');
   } else if (type === 'moneyball') {
-    if (windowOpen) push('Green window', `Close this window net positive — currently ${net >= 0 ? '+' : ''}${moneyShort(net)}.`, net > 0 ? 100 : 50, net > 0);
+    if (windowOpen) push('Green window', `Close this window net positive — currently ${net >= 0 ? '+' : ''}${moneyShort(net)}.`, net > 0 ? 100 : 50, net > 0, 'transfers/targets');
     const over = doc.wages.assessmentList.filter((a) => a.verdict === 'over').length;
-    push('No fat contracts', `${over} player${over === 1 ? '' : 's'} paid above the band.`, over === 0 ? 100 : Math.max(0, 100 - over * 20), over === 0);
+    push('No fat contracts', `${over} player${over === 1 ? '' : 's'} paid above the band.`, over === 0 ? 100 : Math.max(0, 100 - over * 20), over === 0, 'squad/wages');
   } else if (type === 'invincible') {
-    if (cur) push('Zero column', `${cur.losses} ${cur.losses === 1 ? 'loss' : 'losses'} after ${cur.played} — keep the zero.`, cur.losses === 0 ? 100 : 0, cur.losses === 0);
-    if (winRate !== null) push('Kill the draws', `Draws are survivable, losses are not — win rate ${(winRate * 100).toFixed(0)}%.`, (winRate / 0.65) * 100, winRate >= 0.65);
+    if (cur) push('Zero column', `${cur.losses} ${cur.losses === 1 ? 'loss' : 'losses'} after ${cur.played} — keep the zero.`, cur.losses === 0 ? 100 : 0, cur.losses === 0, 'squad/tactics');
+    if (winRate !== null) push('Kill the draws', `Draws are survivable, losses are not — win rate ${(winRate * 100).toFixed(0)}%.`, (winRate / 0.65) * 100, winRate >= 0.65, 'squad/tactics');
   } else if (type === 'century') {
     if (cur) {
       const nextMark = Math.ceil(Math.max(cur.goalsFor + 1, 20) / 20) * 20;
       push(`Reach ${nextMark}`, `${cur.goalsFor} scored — next stop ${nextMark}.`, (cur.goalsFor / nextMark) * 100, false);
-      if (cur.played) push('Three a game', `${(cur.goalsFor / cur.played).toFixed(1)} per game — hold 3.0.`, ((cur.goalsFor / cur.played) / 3) * 100, cur.goalsFor / cur.played >= 3);
+      if (cur.played) push('Three a game', `${(cur.goalsFor / cur.played).toFixed(1)} per game — hold 3.0.`, ((cur.goalsFor / cur.played) / 3) * 100, cur.goalsFor / cur.played >= 3, 'squad/tactics');
     }
   } else if (type === 'youthrev') {
     const xiAges = (doc.matchday?.recommended?.assignments ?? [])
       .map((a) => doc.senior.find((p2) => p2.playerId === a.playerId)?.age)
       .filter((a2) => a2 !== null && a2 !== undefined);
     const xiMean = xiAges.length ? xiAges.reduce((a2, b) => a2 + b, 0) / xiAges.length : null;
-    if (xiMean !== null) push('Keep it young', `Best XI averages ${xiMean.toFixed(1)} — stay under 24.`, (24 / Math.max(xiMean, 1)) * 100, xiMean < 24);
-    if (windowOpen) push('Sign the future', 'Window rule: nobody over 24 comes in.', 50, false);
+    if (xiMean !== null) push('Keep it young', `Best XI averages ${xiMean.toFixed(1)} — stay under 24.`, (24 / Math.max(xiMean, 1)) * 100, xiMean < 24, 'squad/tactics');
+    if (windowOpen) push('Sign the future', 'Window rule: nobody over 24 comes in.', 50, false, 'transfers/targets');
   } else if (type === 'treble') {
     const alive = (doc.board?.competitions ?? []).filter((c) => c.season === doc.season && !c.won && c.result === -1 && !c.notStarted).length;
-    push('Stay alive everywhere', `${alive} competition${alive === 1 ? '' : 's'} still running — lose none of them.`, alive > 0 ? 100 : 0, alive >= 2);
-    if (ppg !== null) push('League pace', `${(ppg * 38).toFixed(0)}-point pace — the treble starts with the title.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88);
+    push('Stay alive everywhere', `${alive} competition${alive === 1 ? '' : 's'} still running — lose none of them.`, alive > 0 ? 100 : 0, alive >= 2, 'squad/tactics');
+    if (ppg !== null) push('League pace', `${(ppg * 38).toFixed(0)}-point pace — the treble starts with the title.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88, 'squad/tactics');
   } else if (type !== 'custom') {
-    if (ppg !== null) push('Title pace', `${(ppg * 38).toFixed(0)} points over 38 at this rate — hold 88+.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88);
-    if (winRate !== null && phase.id === 'runin') push('The run-in', `Win rate ${(winRate * 100).toFixed(0)}% — champions close at 70%+.`, (winRate / 0.7) * 100, winRate >= 0.7);
-    if (windowOpen && gaps.length) push('Cover the gaps', `${gaps.map((g) => g.slot).join(' · ')} thin while the window is open.`, 0, false);
-    else if (windowOpen) push('Squad complete', 'No line is thin — spend nothing you do not need to.', 100, true);
+    if (ppg !== null) push('Title pace', `${(ppg * 38).toFixed(0)} points over 38 at this rate — hold 88+.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88, 'squad/tactics');
+    if (winRate !== null && phase.id === 'runin') push('The run-in', `Win rate ${(winRate * 100).toFixed(0)}% — champions close at 70%+.`, (winRate / 0.7) * 100, winRate >= 0.7, 'squad/tactics');
+    if (windowOpen && gaps.length) push('Cover the gaps', `${gaps.map((g) => g.slot).join(' · ')} thin while the window is open.`, 0, false, 'transfers/targets');
+    else if (windowOpen) push('Squad complete', 'No line is thin — spend nothing you do not need to.', 100, true, 'transfers/targets');
   }
   // Micro: one-save-away nudges from the leaders' own numbers.
   const micro = [];
   const scorer = (doc.stats.topScorers ?? [])[0];
   if (scorer) {
     const nextS = Math.ceil((scorer.goals + 1) / 5) * 5;
-    micro.push({ name: `${scorer.name.split(' ').pop()} to ${nextS}`, line: `${scorer.goals} goals — ${nextS - scorer.goals} to the next mark.`, pct: Math.round((scorer.goals / nextS) * 100), done: false });
+    micro.push({ name: `${scorer.name.split(' ').pop()} to ${nextS}`, line: `${scorer.goals} goals — ${nextS - scorer.goals} to the next mark.`, pct: Math.round((scorer.goals / nextS) * 100), done: false, where: 'squad/tactics' });
   }
   const rated = (doc.stats.bestRated ?? [])[0];
-  if (rated && rated.apps >= 5) micro.push({ name: 'Keep the standard', line: `${rated.name.split(' ').pop()} averages ${rated.rating.toFixed(1)} — hold 8.0+.`, pct: Math.min(100, Math.round((rated.rating / 8) * 100)), done: rated.rating >= 8 });
+  if (rated && rated.apps >= 5) micro.push({ name: 'Keep the standard', line: `${rated.name.split(' ').pop()} averages ${rated.rating.toFixed(1)} — hold 8.0+.`, pct: Math.min(100, Math.round((rated.rating / 8) * 100)), done: rated.rating >= 8, where: 'squad/tactics' });
   const starved = [...doc.senior, ...doc.academy]
     .filter((p2) => (p2.age ?? 99) <= 21 && (p2.headroom ?? 0) >= 5 && (p2.minutesThisSeason ?? 0) < 300)
     .sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0))[0];
-  if (starved) micro.push({ name: `Minutes for ${starved.name.split(' ').pop()}`, line: `${starved.minutesThisSeason ?? 0}' so far — get to 300 before June.`, pct: Math.round(((starved.minutesThisSeason ?? 0) / 300) * 100), done: (starved.minutesThisSeason ?? 0) >= 300 });
+  if (starved) micro.push({ name: `Minutes for ${starved.name.split(' ').pop()}`, line: `${starved.minutesThisSeason ?? 0}' so far — get to 300 before June.`, pct: Math.round(((starved.minutesThisSeason ?? 0) / 300) * 100), done: (starved.minutesThisSeason ?? 0) >= 300, where: 'squad/develop' });
   return { phase, missions: out, micro };
 }
 
@@ -4198,7 +4277,14 @@ function renderCentral(doc) {
           const rank = i + 1;
           const move = r.prevPosition !== null && r.prevPosition > 0 ? r.prevPosition - rank : null;
           const moveCell =
-            move === null
+            r.movedDivision
+              ? {
+                  text: r.movedDivision === 'up' ? '▲ up' : '▼ down',
+                  cls: `${r.movedDivision === 'up' ? 'mv-up' : 'mv-down'}${you ? ' you' : ''}`,
+                  sort: r.movedDivision === 'up' ? '99' : '-99',
+                  title: r.movedDivision === 'up' ? 'Promoted this summer' : 'Relegated into this division',
+                }
+            : move === null
               ? { text: '', cls: you || undefined }
               : {
                   text: move > 0 ? `▲${move}` : move < 0 ? `▼${-move}` : '—',
@@ -4376,6 +4462,8 @@ function renderCentral(doc) {
  */
 function renderDevelop(doc) {
   const frag = document.createDocumentFragment();
+  const quests0 = questStrip(doc, 'squad/develop');
+  if (quests0) frag.appendChild(quests0);
   const everyone = [...doc.senior, ...doc.academy].sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0));
   const growers = everyone.filter((p2) => (p2.headroom ?? 0) >= 2);
   const starved = growers.filter((p2) => (p2.minutesThisSeason ?? 0) < 300 && (p2.age ?? 99) <= 23);
@@ -4666,6 +4754,43 @@ function renderCampaign(doc) {
   return frag;
 }
 
+/**
+ * The campaign, wherever the work actually happens.
+ *
+ * RPG mode is a lens, not a tab: when it is on, the missions that concern a
+ * view appear at the top of it in the campaign's own violet, so a quest is
+ * next to the thing you would do about it. Off, nothing changes anywhere.
+ */
+function questStrip(doc, where) {
+  if (!settings.rpg || !doc?.seasons?.length) return null;
+  let all;
+  try {
+    all = campaignMissions(doc);
+  } catch {
+    return null;
+  }
+  const mine = [...all.missions, ...all.micro].filter((q) => q.where === where);
+  if (!mine.length) return null;
+
+  const box = el('div', 'panel questpanel');
+  const head = el('h2', null, CAMPAIGNS[campaign.type].name);
+  head.appendChild(el('span', 'questbadge', all.phase.label));
+  box.appendChild(head);
+  const grid = el('div', 'queststrip');
+  for (const q of mine) grid.appendChild(questRow(q.name, q.line, q.pct, q.done, true));
+  box.appendChild(grid);
+  const go = el('button', 'ghost tiny-btn', 'The whole campaign ›');
+  activatable(go, () => {
+    state.view = 'story';
+    state.subs.story = 'campaign';
+    localStorage.setItem('view', 'story');
+    localStorage.setItem('subs', JSON.stringify(state.subs));
+    render();
+  });
+  box.appendChild(go);
+  return box;
+}
+
 /** One mission: name, the number behind it, and how far along it is. */
 function questRow(name, line, pct, done, small) {
   const row = el('div', `quest${small ? ' micro' : ''}${done ? ' is-done' : ''}`);
@@ -4679,6 +4804,123 @@ function questRow(name, line, pct, done, small) {
   track.appendChild(fill);
   row.appendChild(track);
   return row;
+}
+
+/**
+ * The Chronicle: the career as chapters, written from the record.
+ *
+ * Every line is a fact the save carries — the finish, the trophies, the record
+ * scoreline, the biggest deal, the milestone that fell that year. Nothing is
+ * narrated that did not happen.
+ */
+function renderChronicle(doc) {
+  const frag = document.createDocumentFragment();
+  const seasons = [...(doc.seasons ?? [])].sort((a, b) => b.season - a.season);
+  const compsBySeason = new Map();
+  for (const c of doc.board?.competitions ?? []) {
+    if (!c.won) continue;
+    compsBySeason.set(c.season, [...(compsBySeason.get(c.season) ?? []), c.name]);
+  }
+
+  {
+    const hero = el('div', 'panel');
+    hero.appendChild(el('h2', null, `${doc.club?.name ?? 'The club'} — the chronicle`));
+    const trophies = seasons.reduce((a, x) => a + x.leagueTrophies + x.cupTrophies, 0);
+    const totals = seasons.reduce(
+      (a, x) => ({ w: a.w + x.wins, d: a.d + x.draws, l: a.l + x.losses }),
+      { w: 0, d: 0, l: 0 },
+    );
+    hero.appendChild(
+      tileRow([
+        ['Chapters', seasons.length],
+        ['Trophies', trophies || null],
+        ['Record', totals.w + totals.d + totals.l ? `${totals.w}-${totals.d}-${totals.l}` : null],
+        ['Manager', doc.manager],
+      ]),
+    );
+    frag.appendChild(hero);
+  }
+
+  const book = el('div', 'chronicle');
+  for (const sn of seasons) {
+    const live = sn.season === doc.season && (sn.position ?? 0) <= 0;
+    const chapter = el('div', `chapter${live ? ' live' : ''}${sn.position === 1 ? ' title' : ''}`);
+
+    const head = el('div', 'chhead');
+    head.appendChild(el('i', 'chnum', `Season ${sn.season}`));
+    const verdict = live
+      ? 'in progress'
+      : sn.position === 1
+        ? 'CHAMPIONS'
+        : sn.position && sn.position > 0
+          ? `finished ${ordinal(sn.position)}`
+          : 'unrecorded';
+    head.appendChild(el('b', 'chverdict', verdict));
+    chapter.appendChild(head);
+
+    const line = el('div', 'chline');
+    const stat = (label, v, cls) => {
+      const c = el('span', `chstat${cls ? ` ${cls}` : ''}`);
+      c.appendChild(el('i', null, label));
+      c.appendChild(el('b', null, String(v)));
+      line.appendChild(c);
+    };
+    stat('W', sn.wins, 'up');
+    stat('D', sn.draws);
+    stat('L', sn.losses, 'down');
+    if (sn.points !== null) stat('Pts', sn.points, 'accent');
+    if (sn.goalsFor !== null) stat('Goals', `${sn.goalsFor}:${sn.goalsAgainst}`);
+    chapter.appendChild(line);
+
+    const events = [];
+    for (const name of compsBySeason.get(sn.season) ?? []) events.push(['🏆', `Won the ${name}.`]);
+    if (sn.leagueTrophies) events.push(['🏆', `League champions${sn.leagueTrophies > 1 ? ` ×${sn.leagueTrophies}` : ''}.`]);
+    if (sn.bigBuy) events.push(['🖊', `Signed ${sn.bigBuy.name} for ${moneyShort(sn.bigBuy.amount)}.`]);
+    if (sn.bigSell) events.push(['💰', `Sold ${sn.bigSell.name} for ${moneyShort(sn.bigSell.amount)}.`]);
+    if (doc.board?.bigWin && String(doc.board.bigWin.date).startsWith(String(2024 + sn.season))) {
+      events.push(['💥', `${doc.board.bigWin.userScore}–${doc.board.bigWin.oppScore} against ${doc.board.bigWin.opponent}.`]);
+    }
+    if (live) {
+      const pace = sn.played ? Math.round(((sn.points ?? 0) / sn.played) * 38) : null;
+      if (pace !== null) events.push(['📈', `${sn.played} played, on a ${pace}-point pace.`]);
+    }
+    if (events.length) {
+      const list = el('div', 'chevents');
+      for (const [icon, text] of events) {
+        const row = el('div', 'chevent');
+        row.appendChild(el('i', null, icon));
+        row.append(text);
+        list.appendChild(row);
+      }
+      chapter.appendChild(list);
+    }
+    book.appendChild(chapter);
+  }
+  if (!seasons.length) book.appendChild(el('p', 'empty', 'No seasons recorded yet.'));
+  frag.appendChild(book);
+
+  if (settings.rpg) {
+    const ladder = campaignLadder(doc, campaign.type);
+    if (ladder) {
+      const done = ladder.filter((m) => m.done);
+      const panel = el('div', 'panel questpanel');
+      panel.appendChild(el('h2', null, `${CAMPAIGNS[campaign.type].name} — milestones reached`));
+      if (done.length) {
+        const list = el('div', 'chevents');
+        for (const m of done) {
+          const row = el('div', 'chevent');
+          row.appendChild(el('i', null, '✓'));
+          row.append(`${m.name}${m.detail ? ` — ${m.detail}` : ''}`);
+          list.appendChild(row);
+        }
+        panel.appendChild(list);
+      } else {
+        panel.appendChild(el('p', 'muted tiny', 'No milestone reached yet. The first one is always the hardest.'));
+      }
+      frag.appendChild(panel);
+    }
+  }
+  return frag;
 }
 
 function renderSettings() {
@@ -4710,12 +4952,13 @@ function renderSettings() {
   frag.appendChild(intro);
 
   const grid = el('div', 'setgrid');
-  const groups = [...new Set(SETTING_DEFS.map((d) => d.group))];
-  const GROUP_ICON = { Display: '🖥', Central: '🏠', Guidance: '🧭', Preferences: '🎛', Modes: '🎮' };
+  // Modes are not a list of switches: each one changes what the whole app is,
+  // so each gets its own box.
+  const groups = [...new Set(SETTING_DEFS.map((d) => (d.group === 'Modes' ? d.label : d.group)))];
   for (const g of groups) {
-    const card = el('div', 'panel');
-    card.appendChild(el('h2', null, `${GROUP_ICON[g] ?? ''} ${g}`));
-    for (const def of SETTING_DEFS.filter((d) => d.group === g)) {
+    const card = el('div', `panel${g.includes('RPG') ? ' modecard rpgcard' : g.includes('AI') ? ' modecard' : ''}`);
+    card.appendChild(el('h2', null, g));
+    for (const def of SETTING_DEFS.filter((d) => (d.group === 'Modes' ? d.label : d.group) === g)) {
       const row = el('div', 'setrow');
       const sw = el('button', `switch${settings[def.key] ? ' on' : ''}`);
       sw.appendChild(el('i', 'knob'));
@@ -4803,7 +5046,7 @@ const VIEWS = {
   academy: {
     label: 'Academy',
     subs: [
-      { id: 'players', label: 'My Academy', render: (d) => renderPlayers(d.academy, { title: '🎓 My academy' }), players: true, count: (d) => d.academy.length || null },
+      { id: 'players', label: 'My Academy', render: renderAcademyHub, players: true, count: (d) => d.academy.length || null },
       { id: 'scouting', label: 'Scout Reports', render: renderScouting, count: (d) => d.scouts.length || null },
     ],
   },
@@ -4821,6 +5064,7 @@ const VIEWS = {
   story: {
     label: 'Story',
     subs: [
+      { id: 'chronicle', label: 'Chronicle', render: renderChronicle },
       { id: 'card', label: 'Brag card', render: renderStory },
       { id: 'campaign', label: 'Campaign', render: renderCampaign },
     ],
@@ -4989,10 +5233,15 @@ function polishPanels(root) {
       );
     }
 
-    // Every explanatory paragraph the panel owns, wherever it sits.
-    const kids = [...panel.children];
-    const prose = kids.filter((k) => k.tagName === 'P' && k.classList.contains('muted'));
-    const substantive = kids.filter((k) => k !== h && !prose.includes(k)).length;
+    // Every explanatory paragraph inside the panel, however deeply a view
+    // happened to nest it — but never one inside a card, a table or a mission,
+    // where the words are the content rather than a description of it.
+    const prose = [...panel.querySelectorAll('p.muted')].filter(
+      (k) => !k.closest('.card, table, .quest, .step, .pkg, .clause, .linkcard, .devcard, .loancard, .settext, .compcard'),
+    );
+    const substantive = [...panel.querySelectorAll(':scope > *')].filter(
+      (k) => k !== h && !prose.includes(k) && !(k.children.length === 0 && prose.includes(k)),
+    ).length;
     if (!prose.length || substantive === 0) continue;
 
     const info = el('button', 'infobtn', 'i');

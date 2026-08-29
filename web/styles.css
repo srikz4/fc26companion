@@ -1676,3 +1676,83 @@ td:has(> .reasons) { white-space: normal; }
 
 /* The tooltip has to carry paragraphs now, so let it breathe. */
 .tipfloat { max-width: 34em; line-height: 1.5; }
+
+/* ============================================================ dwell zone: a dot, not an oval
+
+   The base `.dwellpad` is a bordered 14px circle. Stretching it to the row
+   height in a table cell turned that border into a tall oval, so inside a zone
+   cell the pad is invisible and only its dot shows. */
+td.dwellzone .dwellpad { border: 0; border-radius: 0; width: 14px; }
+
+/* Mode boxes read as what they are: a switch that changes the whole app. */
+.modecard { border-color: var(--line); }
+.rpgcard { border-color: var(--rpg-line, rgba(167,139,250,0.45)); background: linear-gradient(160deg, var(--panel), rgba(167,139,250,0.05)); }
+.rpgcard h2 { color: var(--rpg, #a78bfa); }
+
+.lg-amber { color: var(--act); }
+
+/* ============================================================ RPG: the campaign's own voice
+
+   The app's accent is volt; the campaign's is violet. Anything wearing violet
+   is the story layer talking, and it only ever appears when RPG mode is on. */
+:root { --rpg: #a78bfa; --rpg-line: rgba(167, 139, 250, 0.4); --rpg-bg: rgba(167, 139, 250, 0.1); }
+
+.questpanel {
+  border-color: var(--rpg-line);
+  background: linear-gradient(160deg, var(--panel), var(--rpg-bg));
+}
+.questpanel h2 { color: var(--rpg); }
+.questpanel h2::after { background: linear-gradient(90deg, var(--rpg-line), transparent); }
+.questbadge {
+  order: 0; font-size: 9.5px; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 800;
+  color: var(--rpg); background: var(--rpg-bg); border: 1px solid var(--rpg-line);
+  border-radius: 999px; padding: 2px 9px; letter-spacing: 0.06em;
+}
+.queststrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+.questpanel .quest { border-color: var(--rpg-line); background: var(--panel); }
+.questpanel .quest .bfill { background: var(--rpg); }
+.questpanel .quest.is-done { border-color: var(--rpg); }
+.questpanel .quest.is-done .qhead b { color: var(--rpg); }
+.questpanel .tiny-btn { margin-top: 8px; border-color: var(--rpg-line); color: var(--rpg); }
+
+/* The campaign page speaks in the same violet. */
+.camphero { border-color: var(--rpg-line); background: linear-gradient(160deg, var(--panel), var(--rpg-bg)); }
+.camphero h2 { color: var(--rpg); }
+.sstep.past { background: var(--rpg); opacity: 0.5; }
+.sstep.now { background: var(--rpg); box-shadow: 0 0 8px var(--rpg); }
+.step.done .stepmark { background: var(--rpg); border-color: var(--rpg); color: #0b0f14; }
+.step.next .stepmark { border-color: var(--rpg); color: var(--rpg); box-shadow: 0 0 0 3px var(--rpg-bg); }
+.step.next .stepbody b { color: var(--rpg); }
+.stepnow { color: var(--rpg); background: var(--rpg-bg); }
+
+/* ============================================================ the chronicle */
+.chronicle { display: grid; gap: 12px; }
+.chapter {
+  position: relative;
+  border: 1px solid var(--line-soft); border-left: 3px solid var(--line);
+  border-radius: var(--r-md); background: var(--panel);
+  padding: 13px 16px; display: grid; gap: 9px;
+}
+.chapter.title { border-left-color: var(--t4); }
+.chapter.live { border-left-color: var(--brand); }
+.chhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.chnum {
+  font-style: normal; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  font-weight: 800; color: var(--ink-faint);
+}
+.chverdict { font-size: 18px; font-weight: 800; letter-spacing: 0.01em; }
+.chapter.title .chverdict { color: var(--t4); }
+.chapter.live .chverdict { color: var(--brand); }
+.chline { display: flex; gap: 16px; flex-wrap: wrap; }
+.chstat { display: flex; flex-direction: column; }
+.chstat i { font-style: normal; font-size: 9px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; }
+.chstat b { font-size: 16px; font-weight: 800; }
+.chstat.up b { color: var(--up); }
+.chstat.down b { color: var(--down); }
+.chstat.accent b { color: var(--brand); }
+.chevents { display: grid; gap: 5px; }
+.chevent {
+  display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: baseline;
+  font-size: 13px; color: var(--ink-dim); line-height: 1.5;
+}
+.chevent i { font-style: normal; }

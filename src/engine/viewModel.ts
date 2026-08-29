@@ -19,6 +19,7 @@ import type { NameResolver, NameOrigin } from '../names/nameTable.ts';
 import { readPlayStyles, type PlayStyle } from '../domain/playstyles.ts';
 import {
   ageAt,
+  allGroupsFor,
   dateFromDays,
   FORM_LABELS,
   groupsFor,
@@ -267,6 +268,7 @@ export interface ViewDocument {
       name: string;
       position: number | null;
       prevPosition: number | null;
+      movedDivision: 'up' | 'down' | null;
       played: number;
       wins: number;
       draws: number;
@@ -800,7 +802,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
                 ? 'dip'
                 : 'flat';
 
-    const groups = groupsFor(player).map((group) => {
+    const groups = allGroupsFor(player).map((group) => {
       const attributes: AttributeValue[] = group.members.map((key) => {
         const value = num(player, key);
         const was = num(base, key);
@@ -1505,12 +1507,20 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       const played = wins + draws + ((num(l, 'homelosses') ?? 0) + (num(l, 'awaylosses') ?? 0));
       const gf = (num(l, 'homegf') ?? 0) + (num(l, 'awaygf') ?? 0);
       const ga = (num(l, 'homega') ?? 0) + (num(l, 'awayga') ?? 0);
+      // A club that changed division has no comparable finish: Wolves coming up
+      // as Championship winners read as "▼19 champions" against the Premier
+      // League table, which is nonsense. Say "promoted" instead.
+      const prevLeague = num(l, 'prevleagueid');
+      const league = num(l, 'leagueid');
+      const moved = prevLeague !== null && league !== null && prevLeague !== league;
       return {
         teamId,
         name: teamNames.get(teamId) ?? `team ${teamId}`,
         position: num(l, 'currenttableposition'),
         /** Where they finished last season — the movement arrow's other end. */
-        prevPosition: num(l, 'previousyeartableposition'),
+        prevPosition: moved ? null : num(l, 'previousyeartableposition'),
+        /** 'up' or 'down' when the club changed division over the summer. */
+        movedDivision: (moved ? ((prevLeague ?? 0) > (league ?? 0) ? 'up' : 'down') : null) as 'up' | 'down' | null,
         played,
         wins,
         draws,
@@ -1520,7 +1530,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         gd: gf - ga,
         points: num(l, 'points') ?? 0,
         isUser: teamId === clubId,
-        champion: (num(l, 'champion') ?? 0) !== 0,
+        champion: (num(l, 'champion') ?? 0) !== 0 && !moved,
         unbeaten: (num(l, 'unbeatenleague') ?? 0) !== 0,
       };
     })
@@ -1853,7 +1863,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         weight: num(row, 'weight'),
         skillMoves: num(row, 'skillmoves'),
         weakFoot: num(row, 'weakfootabilitytypecode'),
-        groups: groupsFor(row).map((group) => {
+        groups: allGroupsFor(row).map((group) => {
           const attributes: AttributeValue[] = group.members.map((key) => ({
             name: key,
             value: num(row, key),

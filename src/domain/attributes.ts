@@ -188,5 +188,17 @@ export function ageAt(birthDays: number | null, gameDate: number | null): number
 
 export const isGoalkeeper = (player: Row): boolean => player['preferredposition1'] === 0;
 
+/**
+ * The groups that characterise a player: a keeper is judged on his keeping.
+ * Used for means, percentiles and table columns.
+ */
 export const groupsFor = (player: Row): readonly AttributeGroup[] =>
   isGoalkeeper(player) ? GK_GROUPS : OUTFIELD_GROUPS;
+
+/**
+ * The whole sheet, as the game shows it. FC 26 prints every attribute on every
+ * player's card — a keeper has a Pace and a Shooting rating too — so the card
+ * shows all of them and simply leads with the ones that define him.
+ */
+export const allGroupsFor = (player: Row): readonly AttributeGroup[] =>
+  isGoalkeeper(player) ? [...GK_GROUPS, ...OUTFIELD_GROUPS] : OUTFIELD_GROUPS;
