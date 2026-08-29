@@ -54,6 +54,10 @@ Companion stands on work by the FC/FIFA community and open-source authors:
   are derived.
 - **[futwiz](https://www.futwiz.com)** — the source the optional one-time face importer
   downloads player headshots from. The images are never bundled or redistributed.
+- **[FIFACM](https://www.fifacm.com/calculator/value)** — the EA-style player-valuation curves
+  in `src/engine/eaValue.ts` were calibrated against their public FC 26 value calculator
+  (a one-time sampling; nothing is fetched at runtime). Values shown are approximations and
+  are marked as derived.
 - **Dependencies** — [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (MIT),
   [fast-xml-parser](https://github.com/NaturalIntelligence/fast-xml-parser) (MIT),
   [tsx](https://github.com/privatenumber/tsx) (MIT), and

@@ -36,9 +36,13 @@ const SETTING_DEFS = [
   { key: 'newsFeed', group: 'Central', label: 'Around the world', note: 'The save\u2019s own event feed — transfers and news across this world.', on: true },
   { key: 'developFocus', group: 'Guidance', label: 'Development focus', note: 'On the player card: the attributes where growth buys the most, from the fit weights and this world\u2019s percentiles. Point the game\u2019s development plans at them.', on: true },
   { key: 'absurd', group: 'Guidance', label: 'The absurd bit', note: 'The cheeky lines on the Story card.', on: true },
+  { key: 'compact', group: 'Preferences', label: 'Compact density', note: 'Tighter paddings and smaller type everywhere — more career per screen.', on: false },
+  { key: 'fullMoney', group: 'Preferences', label: 'Full money figures', note: 'Show 12,500,000 instead of 12.5M wherever money appears shortened.', on: false },
   { key: 'rpg', group: 'Modes', label: 'RPG mode', note: 'Career-as-campaign: live challenges computed from your save, with progress. Deterministic — every number is real.', on: false },
   { key: 'ai', group: 'Modes', label: 'AI mode', note: 'AI narration and insights on top of the recorded facts. Needs a local model or an API key; until one is configured this shows its setup status.', on: false },
 ];
+/** Landing tab: where a fresh open of Companion starts. */
+const LANDING_CHOICES = ['central', 'squad', 'transfers', 'academy', 'office', 'story'];
 const settings = (() => {
   try {
     return { ...Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d.on])), ...JSON.parse(localStorage.getItem('settings') || '{}') };
@@ -125,6 +129,8 @@ const money = (n) => (n === null || n === undefined ? null : n.toLocaleString('e
 const moneyShort = (n) =>
   n === null || n === undefined
     ? '—'
+    : settings.fullMoney && n !== 0
+      ? n.toLocaleString('en-GB')
     : n === 0
       ? '0M'
       : n >= 1_000_000
@@ -567,9 +573,9 @@ const SORTS = {
  * word — the arrow from overall to ceiling says it, and the tooltip spells it
  * out in English.
  */
-function playerCard(p, onClose) {
+function playerCard(p, onClose, mode = 'basic') {
   const card = el('div', `card ${p.advice.severity}`);
-  if (state.open.has(p.playerId)) card.classList.add('open');
+  if (state.open.has(p.playerId) || mode === 'attributes') card.classList.add('open');
 
   // --- what to do about him
   const notable = [p.advice, ...p.otherAdvice].filter((a) => a.severity !== 'steady');
@@ -705,9 +711,10 @@ function playerCard(p, onClose) {
     tile.appendChild(row);
 
     // A one-attribute group (every goalkeeper group) would just print its own
-    // number again underneath itself.
+    // number again underneath itself — except on the Attributes view, where
+    // the full sheet is the point.
     const attrs = el('div', 'attrs');
-    if (group.attributes.length > 1) for (const a of group.attributes) {
+    if (group.attributes.length > 1 || mode === 'attributes') for (const a of group.attributes) {
       const line = el('div', 'attr');
       line.appendChild(el('span', 'an', prettyAttr(a.name)));
       line.appendChild(el('span', `av ${tier(a.value)}`, a.value ?? '—'));
@@ -777,6 +784,47 @@ function playerCard(p, onClose) {
     card.appendChild(box);
   }
 
+  // The Stats view of the card: his season, match by match.
+  if (mode === 'stats' && p.recentRatings?.length) {
+    const rec = el('div', 'notes');
+    rec.appendChild(el('span', 'lbl', 'RECENT MATCHES'));
+    rec.appendChild(
+      table(
+        ['Date', 'Position', { label: 'Min', num: true }, { label: 'Rating', num: true }],
+        p.recentRatings.slice(-8).reverse().map((m) => [
+          fmtDate(m.date),
+          m.position,
+          { text: m.minutes, num: true },
+          { text: m.rating, num: true, tier: m.rating >= 8 ? 90 : m.rating >= 7 ? 82 : 70 },
+        ]),
+        { tight: true },
+      ),
+    );
+    card.appendChild(rec);
+  }
+
+  // The Financial view of the card: everything money knows about him.
+  if (mode === 'financial') {
+    const doc2 = state.doc;
+    const sv = doc2?.sellValues?.rows?.find((r) => r.playerId === p.playerId);
+    const ren = doc2?.wages?.renewals?.find((r) => r.playerId === p.playerId);
+    const fin = el('div', 'notes');
+    fin.appendChild(el('span', 'lbl', 'MONEY'));
+    const line = (k, v, tip) => {
+      const row = el('div', 'note steady');
+      row.appendChild(el('b', null, k));
+      const sp = el('span', null, v);
+      if (tip) sp.dataset.tip = tip;
+      row.appendChild(sp);
+      fin.appendChild(row);
+    };
+    if (sv?.ea) line('EA value ~', `${moneyShort(sv.ea.value)} · floor ${moneyShort(sv.ea.floor)} · ceiling ${moneyShort(sv.ea.ceiling)}`, 'EA-style valuation from community-derived curves — a guide, never a rule input.');
+    if (sv?.mid != null) line('World pays', `${moneyShort(sv.low)}–${moneyShort(sv.high)}`, `Fitted on the deals this world has actually agreed.`);
+    if (p.wageNote) line('Wage check', p.wageNote);
+    if (ren) line('Renewal', `${ren.options[0].years}y flat at ${money(ren.options[0].weeklyWage)}/wk — the game takes at most ${ren.maxYears}y at this age`, 'Both packages, with bonuses and the clause call, under Squad › Wages.');
+    card.appendChild(fin);
+  }
+
   const actions = el('div', 'rowacts');
   const toggle = el('button', 'ghost', state.open.has(p.playerId) ? 'Hide attributes' : 'Attributes');
   activatable(toggle, () => {
@@ -829,6 +877,10 @@ function prettyAttr(key) {
  * rows without re-rendering — the top-level sort bar is gone; the columns you
  * can see are the sorts you get.
  */
+/**
+ * opts.onRow + opts.keys make rows activatable: keys[i] identifies row i and
+ * survives re-sorting, because it rides on the row element itself.
+ */
 function table(headers, rows, opts = {}) {
   const wrap = el('div', 'table-wrap');
   const t = el('table');
@@ -866,8 +918,13 @@ function table(headers, rows, opts = {}) {
   thead.appendChild(hr);
   t.appendChild(thead);
   const tbody = el('tbody');
-  for (const row of rows) {
+  rows.forEach((row, ri) => {
     const tr = el('tr');
+    if (opts.keys && opts.onRow) {
+      tr.dataset.key = String(opts.keys[ri]);
+      tr.classList.add('rowable');
+      activatable(tr, () => opts.onRow(tr.dataset.key), { pad: true });
+    }
     row.forEach((cell, ci) => {
       const hmeta = typeof headers[ci] === 'object' ? headers[ci] : {};
       const isObj = typeof cell === 'object' && cell !== null;
@@ -896,7 +953,7 @@ function table(headers, rows, opts = {}) {
       tr.appendChild(td);
     });
     tbody.appendChild(tr);
-  }
+  });
   t.appendChild(tbody);
   wrap.appendChild(t);
   return wrap;
@@ -1445,6 +1502,27 @@ function renderSynergy(doc) {
   const nameOf = (id) => byId.get(id)?.name ?? `#${id}`;
   const syn = doc.synergy;
 
+  // The headline first: how connected the XI is, at a glance.
+  {
+    const hero = el('div', 'panel');
+    hero.appendChild(el('h2', null, '🕸 Synergy'));
+    const line = el('div', 'hero-line');
+    const cell = (v, l2, cls) => {
+      const c2 = el('span', `stat big${cls ? ` ${cls}` : ''}`);
+      c2.appendChild(el('b', null, String(v)));
+      c2.appendChild(el('i', null, l2));
+      line.appendChild(c2);
+    };
+    cell(syn.xi?.teamScore ?? '—', 'XI connection', (syn.xi?.teamScore ?? 0) >= 70 ? 'h-up' : '');
+    cell(syn.xi?.links?.length ?? 0, 'live links', '');
+    cell(syn.xi?.coldPairs?.length ?? 0, 'cold pairs', (syn.xi?.coldPairs?.length ?? 0) > 2 ? 'h-down' : '');
+    cell(syn.partnerships.length, 'squad patterns', '');
+    hero.appendChild(line);
+    const top = syn.partnerships[0];
+    if (top) hero.appendChild(el('p', 'tipline', `Strongest pattern in the squad: ${top.channel} — ${nameOf(top.supplier)} → ${nameOf(top.receiver)} at ${top.strength}.`));
+    frag.appendChild(hero);
+  }
+
   const decompose = (l) =>
     `${nameOf(l.supplier)} supplies ${l.supplierScore}, ${nameOf(l.receiver)} receives ${l.receiverScore} — ` +
     `strength √(${l.supplierScore}×${l.receiverScore})` +
@@ -1665,19 +1743,19 @@ function renderTransfers(doc) {
   const targets = el('div', 'panel');
   targets.appendChild(el('h2', null, `${list.length} targets from ${t.scanned.toLocaleString('en-GB')} scanned`));
   targets.appendChild(modeBar);
-  if (doc.deals.modelled) {
-    targets.appendChild(
-      el(
-        'p',
-        'muted tiny',
-        `Fair fee is fitted on the ${doc.deals.sample} transfers this world has actually completed — a reference band, not an oracle. ` +
-          'Open a negotiation near the top of the band and walk at the bottom.',
-      ),
-    );
-  }
+  targets.appendChild(
+    el(
+      'p',
+      'muted tiny',
+      'EA value ~ is the game\u2019s own idea of a fair fee, rebuilt from community-derived curves (ovr × age × ceiling × position). ' +
+        (doc.deals.modelled
+          ? `Hover it for what this world has actually paid (${doc.deals.sample} observed deals).`
+          : 'What this world actually pays appears alongside once the window produces priced deals.'),
+    ),
+  );
   targets.appendChild(
     table(
-      ['', 'Player', 'Club', { label: 'Pos', pos: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Fit', num: true }, { label: 'Synergy', num: true }, { label: 'Age', num: true }, 'Fair fee', 'Why'],
+      ['', 'Player', 'Club', { label: 'Pos', pos: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Fit', num: true }, { label: 'Synergy', num: true }, { label: 'Age', num: true }, { label: 'EA value ~', num: true }, 'Why'],
       list.slice(0, 40).map((x) => [
         { text: '', star: { on: shortlisted(x.playerId), onToggle: () => toggleShortlist(x, doc.gameDate) } },
         { text: x.name, title: x.teamName ? `currently at ${x.teamName}` : undefined },
@@ -1696,10 +1774,12 @@ function renderTransfers(doc) {
         },
         { text: x.age ?? '—', num: true },
         {
-          text: x.feeGuide ? `${moneyShort(x.feeGuide.low)}–${moneyShort(x.feeGuide.high)}` : '—',
-          title: x.feeGuide
-            ? `Model midpoint ${moneyShort(x.feeGuide.mid)}, fitted on ${x.feeGuide.sample} observed deals`
-            : 'Bigger than any deal this world has done — no honest estimate exists yet',
+          text: x.ea ? moneyShort(x.ea.value) : '—',
+          num: true,
+          title: [
+            x.ea ? `EA-style: floor ${moneyShort(x.ea.floor)} · ceiling ${moneyShort(x.ea.ceiling)}` : null,
+            x.feeGuide ? `This world has paid ${moneyShort(x.feeGuide.low)}–${moneyShort(x.feeGuide.high)} for this profile (${x.feeGuide.sample} deals)` : null,
+          ].filter(Boolean).join('\n') || undefined,
         },
         { text: x.reasons.join('; ') },
       ]),
@@ -1746,7 +1826,11 @@ function renderWages(doc) {
     const everyone = [...doc.senior, ...doc.academy.filter((p) => renewalOf.has(p.playerId))].sort(
       (a, b) => posRank(a.positionShort ?? '') - posRank(b.positionShort ?? '') || (b.overall ?? 0) - (a.overall ?? 0),
     );
-    const listed = state.wageFilter === 'worth' ? everyone.filter((p) => renewalOf.has(p.playerId)) : everyone;
+    const dueCount = w.renewals.filter((r) => r.urgency !== 'later').length;
+    const listed =
+      state.wageFilter === 'due'
+        ? everyone.filter((p) => (renewalOf.get(p.playerId)?.urgency ?? 'later') !== 'later')
+        : everyone;
 
     const panel = el('div', 'panel');
     panel.appendChild(el('h2', null, `Wages & renewals — ${listed.length} of ${everyone.length}`));
@@ -1754,13 +1838,14 @@ function renderWages(doc) {
       el(
         'p',
         'muted',
-        'Two shapes per player: flat, and a lower base with appearance money. Anchored to the role band and current wage — ' +
-          'the save records no wage demand, so none is invented.',
+        'Every player with a recorded wage gets a proposal — role, term, wage, bonus, the clause call. Two shapes each: ' +
+          'flat, and a lower base with appearance money. Anchored to the role band and current wage; the save records no ' +
+          'wage demand, so none is invented. When to renew is your call.',
       ),
     );
 
     const modes = el('div', 'chiprow');
-    for (const [label, mode] of [[`Whole squad ${everyone.length}`, 'all'], [`Renewals worth doing ${w.renewals.length}`, 'worth']]) {
+    for (const [label, mode] of [[`Whole squad ${everyone.length}`, 'all'], [`Due now or soon ${dueCount}`, 'due']]) {
       const chip = el('button', `chip${(state.wageFilter ?? 'all') === mode ? ' on' : ''}`, label);
       activatable(
         chip,
@@ -1834,8 +1919,19 @@ function renderWages(doc) {
       if (p.positionShort) head.appendChild(el('span', 'badge-pos', p.positionShort));
       right.appendChild(head);
       right.appendChild(
-        el('p', 'muted', `On ${money(sel.currentWage)} a week${sel.monthsLeft === null ? '' : `, ${fmtTerm(sel.monthsLeft)} left`}.`),
+        el('p', 'muted', `On ${money(sel.currentWage)} a week${sel.monthsLeft === null ? '' : `, ${fmtTerm(sel.monthsLeft)} left`}${p.squadRole && p.squadRole !== 'None' ? ` · ${p.squadRole}` : ''}${p.age !== null ? ` · ${p.age}y` : ''}.`),
       );
+      right.appendChild(
+        el('p', 'muted tiny', `Longest total term the game will take at this age: ~${sel.maxYears} years. How much of it to use is your preference, not a rule.`),
+      );
+      // The Amad lesson: a fast riser renewed on yesterday's number comes back
+      // for more, and the game blocks a second renegotiation — then the
+      // transfer request lands. Pay tomorrow's wage the first time.
+      if ((p.headroom ?? 0) >= 4 || p.trend === 'surge') {
+        const warn = el('p', 'tipline');
+        warn.textContent = `⚠ Still growing (${p.overall}→${p.potential}). Renew once and renew generously — after a renewal the game refuses another for a long stretch, and a riser who outgrows his new wage can force a move. The flat option below already prices the growth in.`;
+        right.appendChild(warn);
+      }
 
       for (const o of sel.options) {
         const box = el('div', 'pkg');
@@ -1975,38 +2071,130 @@ function renderLoans(doc) {
     const panel = el('div', 'panel');
     panel.appendChild(el('h2', null, `Should go out — ${L.candidates.length}`));
     panel.appendChild(
+      table(
+        ['Player', 'Why', 'Best-fit clubs'],
+        L.candidates.map((c) => [
+          nameOf(c.playerId),
+          { text: c.reason, cls: 'wrap' },
+          {
+            text: c.destinations.slice(0, 2).map((d) => d.teamName).join(' · ') || 'no club in range',
+            cls: 'wrap',
+            title: c.destinations.length
+              ? c.destinations.map((d) => `${d.teamName} (${d.leagueName ?? '?'}, OVR ${d.clubOverall}) — ${d.read}`).join('\n')
+              : 'Nobody rated right in a signable league — the answer may simply be minutes here.',
+          },
+        ]),
+      ),
+    );
+    panel.appendChild(el('p', 'muted tiny', 'One row each — hover the clubs for the full read. When an actual approach arrives, score it below instead of guessing.'));
+    frag.appendChild(panel);
+  }
+
+  // --- score a real approach: the club that just called, judged on the spot
+  {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, '📞 Score a loan approach'));
+    panel.appendChild(
       el(
         'p',
         'muted',
-        'Players the rules say need football elsewhere, each with clubs where their level makes them a starter — ' +
-          'rated at or just below them, in a signable domestic league. A loan to a better team’s bench defeats the purpose.',
+        'A club is asking for your player: pick the player and the club, and the offer is scored from the save — would he start there, does the level stretch him, is the league worth his minutes. No what-ifs, just the measurements.',
       ),
     );
-    for (const c of L.candidates) {
+
+    const pool = [...doc.senior, ...doc.academy]
+      .filter((p2) => (p2.age ?? 99) <= 23 && (p2.headroom ?? 0) >= 2 && !p2.onLoan)
+      .sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0))
+      .slice(0, 14);
+    if (!pool.length) {
+      panel.appendChild(el('p', 'muted tiny', 'Nobody in the squad fits the loan-out profile right now.'));
+      frag.appendChild(panel);
+      return frag;
+    }
+    if (!state.loanPlayer || !pool.some((p2) => p2.playerId === state.loanPlayer)) state.loanPlayer = pool[0].playerId;
+    const pchips = el('div', 'chiprow');
+    for (const p2 of pool) {
+      const chip = el('button', `chip${state.loanPlayer === p2.playerId ? ' on' : ''}`, `${p2.name} ${p2.overall}`);
+      activatable(chip, () => { state.loanPlayer = p2.playerId; render(); }, { skipWhen: () => state.loanPlayer === p2.playerId });
+      pchips.appendChild(chip);
+    }
+    panel.appendChild(pchips);
+
+    // Nation → league → club, same ladder as the opponent scout.
+    const opps = doc.opponents ?? [];
+    const nations = [...new Set(opps.map((o) => o.nation))].sort();
+    if (!state.loanNation || !nations.includes(state.loanNation)) state.loanNation = nations[0] ?? null;
+    const nchips = el('div', 'chiprow');
+    for (const n2 of nations) {
+      const chip = el('button', `chip${state.loanNation === n2 ? ' on' : ''}`, `${flagFor(n2)}${n2}`);
+      activatable(chip, () => { state.loanNation = n2; state.loanLeague = null; state.loanClub = null; render(); }, { skipWhen: () => state.loanNation === n2 });
+      nchips.appendChild(chip);
+    }
+    panel.appendChild(nchips);
+    const leagues = [...new Set(opps.filter((o) => o.nation === state.loanNation).map((o) => o.league))].sort();
+    if (!state.loanLeague || !leagues.includes(state.loanLeague)) state.loanLeague = leagues[0] ?? null;
+    if (leagues.length > 1) {
+      const lchips = el('div', 'chiprow');
+      for (const lg of leagues) {
+        const chip = el('button', `chip${state.loanLeague === lg ? ' on' : ''}`, lg);
+        activatable(chip, () => { state.loanLeague = lg; state.loanClub = null; render(); }, { skipWhen: () => state.loanLeague === lg });
+        lchips.appendChild(chip);
+      }
+      panel.appendChild(lchips);
+    }
+    const clubs = opps.filter((o) => o.league === state.loanLeague && o.teamId !== doc.club?.id);
+    if (!state.loanClub || !clubs.some((c) => c.teamId === state.loanClub)) state.loanClub = null;
+    const cchips = el('div', 'chiprow');
+    for (const o of clubs) {
+      const chip = el('button', `chip teamchip${state.loanClub === o.teamId ? ' on' : ''}`);
+      chip.appendChild(el('span', null, o.name));
+      activatable(chip, () => { state.loanClub = o.teamId; render(); }, { skipWhen: () => state.loanClub === o.teamId });
+      cchips.appendChild(chip);
+    }
+    panel.appendChild(cchips);
+
+    const player = pool.find((p2) => p2.playerId === state.loanPlayer);
+    const club = clubs.find((c) => c.teamId === state.loanClub);
+    if (player && club) {
+      const groupOf2 = (short) =>
+        short === 'GK' ? 'gk' : ['CB', 'RB', 'LB', 'RWB', 'LWB'].includes(short) ? 'def' : ['CDM', 'CM', 'CAM', 'RM', 'LM'].includes(short) ? 'mid' : 'att';
+      const line = club[groupOf2(player.positionShort ?? 'CM')] ?? club.overall;
+      const reasons = [];
+      let score = 0;
+      const lineDiff = line !== null && player.overall !== null ? Math.round((player.overall - line) * 10) / 10 : null;
+      if (lineDiff !== null) {
+        if (lineDiff >= 2) { score += 4; reasons.push(`Walks into their ${groupOf2(player.positionShort ?? 'CM').toUpperCase()} line (${player.overall} v their ${line}) — minutes near-guaranteed.`); }
+        else if (lineDiff >= 0) { score += 3; reasons.push(`At the level of their ${groupOf2(player.positionShort ?? 'CM').toUpperCase()} line (${player.overall} v ${line}) — should start most weeks.`); }
+        else if (lineDiff >= -2) { score += 2; reasons.push(`Slightly under their line (${player.overall} v ${line}) — a fight for the shirt, which can be the point.`); }
+        else { reasons.push(`Well under their ${groupOf2(player.positionShort ?? 'CM').toUpperCase()} line (${player.overall} v ${line}) — bench risk, which defeats a loan.`); }
+      }
+      const clubDiff = club.overall !== null && player.overall !== null ? Math.round((club.overall - player.overall) * 10) / 10 : null;
+      if (clubDiff !== null) {
+        if (clubDiff >= -4 && clubDiff <= 2) { score += 3; reasons.push(`The club (${club.overall}) sits right in the stretch zone for a ${player.overall}-rated player.`); }
+        else if (clubDiff < -4) { score += 1; reasons.push(`The club (${club.overall}) is well below his level — easy minutes, little stretch.`); }
+        else { score += 1; reasons.push(`The club (${club.overall}) is above his level — good football if he plays, but will he?`); }
+      }
+      const leagueClubs = opps.filter((o) => o.league === club.league);
+      const leagueMean = leagueClubs.length
+        ? Math.round((leagueClubs.reduce((a, o) => a + (o.overall ?? 0), 0) / leagueClubs.length) * 10) / 10
+        : null;
+      if (leagueMean !== null && player.overall !== null) {
+        if (leagueMean >= player.overall - 5) { score += 2; reasons.push(`${club.league} averages ${leagueMean} — strong enough that the minutes count double.`); }
+        else { score += 1; reasons.push(`${club.league} averages ${leagueMean} — a soft league for him; expect volume, not schooling.`); }
+      }
+      if ((player.age ?? 99) <= 21 && (player.headroom ?? 0) >= 4) { score += 1; reasons.push(`${player.age}y with ${player.headroom} of ceiling left — exactly who development loans exist for.`); }
+
+      const verdict = score >= 8 ? 'Take it' : score >= 6 ? 'Take it, with terms' : score >= 4 ? 'Negotiate or decline' : 'Decline';
       const box = el('div', 'pkg');
-      const head = el('div', 'pkg-head');
-      head.appendChild(el('b', null, nameOf(c.playerId)));
-      head.appendChild(el('span', 'muted tiny', c.reason));
-      box.appendChild(head);
-      for (const g of c.dealGuide ?? []) {
-        box.appendChild(el('p', 'muted tiny', `→ ${g}`));
-      }
-      if (c.destinations.length) {
-        box.appendChild(
-          table(
-            ['Club', 'League', { label: 'Their OVR', num: true }, 'Read'],
-            c.destinations.map((d) => [
-              d.teamName,
-              d.leagueName ?? '—',
-              { text: d.clubOverall, num: true },
-              { text: d.read, cls: 'wrap' },
-            ]),
-          ),
-        );
-      } else {
-        box.appendChild(el('p', 'muted tiny', 'No club in range — the answer may simply be minutes here.'));
-      }
+      const head2 = el('div', 'pkg-head');
+      head2.appendChild(el('b', null, `${player.name} → ${club.name}`));
+      head2.appendChild(el('span', 'pkg-wage', `${score}/10 · ${verdict}`));
+      box.appendChild(head2);
+      for (const r2 of reasons) box.appendChild(el('p', 'muted tiny', `· ${r2}`));
+      box.appendChild(el('p', 'pkg-trade', 'Terms worth demanding: no buy option on anyone with ceiling left; a recall clause if minutes dry up. The save records neither, so hold them in the negotiation itself.'));
       panel.appendChild(box);
+    } else {
+      panel.appendChild(el('p', 'muted tiny', 'Pick a club to score the approach.'));
     }
     frag.appendChild(panel);
   }
@@ -2064,10 +2252,34 @@ function renderScouting(doc) {
 
   {
     const notes = el('div', 'panel');
-    notes.appendChild(el('h2', null, '📬 Reports'));
-    notes.appendChild(
-      el('p', 'muted tiny', 'The report screen itself is never written to disk — a prospect exists in the save only once you sign him to the academy, and from that moment he is under My Academy with tier, potential range and months-in-squad. What is readable before that is above: who is out, where, hunting which positions, and when they return.'),
-    );
+    const reports = doc.academyReports ?? [];
+    notes.appendChild(el('h2', null, `📬 Report prospects — ${reports.length}`));
+    if (reports.length) {
+      notes.appendChild(
+        el('p', 'muted', 'Prospects the scouts have brought back but you have not signed: the save writes them to disk on report day, before any signing. Each carries a verdict weighed against the academy you already have and the positions that are thin.'),
+      );
+      notes.appendChild(
+        table(
+          ['Prospect', { label: 'Pos', pos: true }, 'From', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Ceiling', num: true }, { label: '±', num: true }, 'Verdict', 'Why'],
+          reports.map((r) => [
+            r.name,
+            { text: r.pos ?? '—', cls: 'posbadge' },
+            `${flagFor(r.nation)}${r.nation ?? '—'}`,
+            { text: r.age ?? '—', num: true },
+            { text: r.overall ?? '—', num: true, tier: r.overall },
+            { text: r.potential ?? '—', num: true, tier: r.potential },
+            { text: r.potentialVariance ?? '—', num: true, title: 'Potential variance from the scout report — bigger means the ceiling is less certain' },
+            { text: r.verdict.toUpperCase(), cls: r.verdict === 'sign' ? 'v-sign' : r.verdict === 'pass' ? 'v-pass' : 'v-watch' },
+            { text: r.why, cls: 'wrap' },
+          ]),
+        ),
+      );
+      notes.appendChild(el('p', 'muted tiny', 'Sign or release them in game; this list follows the save. Signed prospects move to My Academy with tier and months tracked.'));
+    } else {
+      notes.appendChild(
+        el('p', 'muted tiny', 'No unsigned reports in the save right now. When a scout trip lands, the prospects appear here — with a sign-or-pass verdict weighed against your academy — before you have touched anything in game.'),
+      );
+    }
     frag.appendChild(notes);
   }
   return frag;
@@ -2251,6 +2463,24 @@ function renderSquadHub(doc) {
   }
 
   const list = applyFilters(doc.senior);
+  // A selected row opens the card above the table, dressed for this view:
+  // Stats shows the match log, Attributes the full sheet, Financial the money.
+  const selected = list.find((p2) => p2.playerId === state.hubSel) ?? null;
+  if (selected) {
+    frag.appendChild(
+      playerCard(selected, () => {
+        state.hubSel = null;
+        render();
+      }, mode),
+    );
+  }
+  const rowOpts = {
+    keys: list.map((p2) => p2.playerId),
+    onRow: (key) => {
+      state.hubSel = Number(key);
+      render();
+    },
+  };
   const panel = el('div', 'panel');
   if (mode === 'stats') {
     panel.appendChild(el('h2', null, '📊 Season numbers'));
@@ -2268,8 +2498,10 @@ function renderSquadHub(doc) {
           { text: p.minutesThisSeason ?? '—', num: true },
           p.form ?? '—',
         ]),
+        rowOpts,
       ),
     );
+    panel.appendChild(el('p', 'muted tiny', 'Tap a row for the card with his match log.'));
   } else if (mode === 'attributes') {
     const sample = list.find((p) => p.positionShort !== 'GK') ?? list[0];
     const groups = sample?.groups?.map((g) => g.name) ?? [];
@@ -2286,33 +2518,42 @@ function renderSquadHub(doc) {
             return { text: grp?.mean ?? '—', num: true, tier: grp?.mean };
           }),
         ]),
+        rowOpts,
       ),
     );
-    panel.appendChild(el('p', 'muted tiny', 'Group means. A keeper\u2019s groups differ from an outfielder\u2019s, so his columns read — here; open his card for the full sheet.'));
+    panel.appendChild(el('p', 'muted tiny', 'Group means; tap a row for the card with the full attribute sheet. A keeper\u2019s groups differ from an outfielder\u2019s, so his columns read — here.'));
   } else {
     const valueOf = new Map((doc.sellValues?.rows ?? []).map((r) => [r.playerId, r]));
     panel.appendChild(el('h2', null, '💷 Money'));
     panel.appendChild(
       table(
-        ['Player', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Wage', num: true }, 'Contract', 'Wage check', { label: 'Value', num: true }],
+        ['Player', { label: 'Pos', pos: true }, { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Wage', num: true }, 'Contract', 'Wage check', { label: 'EA value ~', num: true }, { label: 'World pays', num: true }],
         list.map((p) => {
           const v = valueOf.get(p.playerId);
           return [
             p.name,
+            { text: p.positionShort ?? '—', cls: 'posbadge' },
             { text: p.age ?? '—', num: true },
             { text: p.overall ?? '—', num: true, tier: p.overall },
             { text: money(p.wage) ?? '—', num: true },
             p.contractMonths !== null ? fmtTerm(p.contractMonths) : '—',
             p.wageVerdict ?? '—',
             {
+              text: v?.ea ? moneyShort(v.ea.value) : '—',
+              num: true,
+              title: v?.ea ? `EA-style: floor ${moneyShort(v.ea.floor)}, ceiling ${moneyShort(v.ea.ceiling)}` : undefined,
+            },
+            {
               text: v?.mid != null ? moneyShort(v.mid) : '—',
               num: true,
-              title: v?.mid != null ? `This world's own deals price him ${moneyShort(v.low)}–${moneyShort(v.high)}` : 'No priced deals in this world to model from yet',
+              title: v?.mid != null ? `This world's own deals: ${moneyShort(v.low)}–${moneyShort(v.high)}` : 'No priced deals in this world to model from yet',
             },
           ];
         }),
+        rowOpts,
       ),
     );
+    panel.appendChild(el('p', 'muted tiny', 'Tap a row for the card with the full money read.'));
   }
   frag.appendChild(panel);
   return frag;
@@ -2338,7 +2579,7 @@ function renderIngameShortlist(doc) {
   } else {
     panel.appendChild(
       table(
-        ['Player', 'Club', 'League', 'From', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Fee guide', num: true }],
+        ['Player', 'Club', 'League', 'From', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'EA value ~', num: true }],
         sl.players.map((p) => [
           p.name,
           p.club ?? '—',
@@ -2348,9 +2589,12 @@ function renderIngameShortlist(doc) {
           { text: p.overall ?? '—', num: true, tier: p.overall },
           { text: p.potential ?? '—', num: true, tier: p.potential },
           {
-            text: p.fee ? moneyShort(p.fee.mid) : '—',
+            text: p.ea ? moneyShort(p.ea.value) : '—',
             num: true,
-            title: p.fee ? `Modelled from this world's own deals: ${moneyShort(p.fee.low)}–${moneyShort(p.fee.high)}` : 'No priced deals in this world to model from yet',
+            title: [
+              p.ea ? `EA-style: floor ${moneyShort(p.ea.floor)} · ceiling ${moneyShort(p.ea.ceiling)}` : null,
+              p.fee ? `This world has paid ${moneyShort(p.fee.low)}–${moneyShort(p.fee.high)} for this profile` : null,
+            ].filter(Boolean).join('\n') || 'No estimate available',
           },
         ]),
       ),
@@ -2372,31 +2616,44 @@ function renderSellValues(doc) {
   const sv = doc.sellValues;
   const panel = el('div', 'panel');
   panel.appendChild(el('h2', null, '💰 Sell values'));
-  if (!sv?.modelled) {
-    panel.appendChild(
-      el('p', 'muted', `No asking prices yet: the fee model fits itself to this world's own agreed transfers, and the save currently records ${sv?.sample ?? 0} priced deals. Play through a window — as the world does business, every player here gets a floor–expect–ask band.`),
-    );
-  } else {
-    panel.appendChild(
-      table(
-        ['Player', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Wage', num: true }, 'Contract', { label: 'Floor', num: true }, { label: 'Expect', num: true }, { label: 'Ask', num: true }],
-        sv.rows.map((r) => [
+  panel.appendChild(
+    el(
+      'p',
+      'muted',
+      'EA-style valuation for every senior player — the game\u2019s own idea of fair, rebuilt from community-derived curves. ' +
+        'Floor: walk away below it. Ceiling: where a motivated buyer can be pushed. Marked ~ because it is derived, not read; ' +
+        'when an in-game screen disagrees, tell Companion and the curves get recalibrated.',
+    ),
+  );
+  panel.appendChild(
+    table(
+      ['Player', { label: 'Pos', pos: true }, { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Wage', num: true }, 'Contract', { label: 'Floor', num: true }, { label: 'EA value ~', num: true }, { label: 'Ceiling', num: true }, { label: 'World pays', num: true }],
+      sv.rows.map((r) => {
+        const p2 = window.__doc?.senior?.find((x) => x.playerId === r.playerId);
+        return [
           r.name,
+          { text: p2?.positionShort ?? '—', cls: 'posbadge' },
           { text: r.age ?? '—', num: true },
           { text: r.overall ?? '—', num: true, tier: r.overall },
           { text: r.potential ?? '—', num: true, tier: r.potential },
           { text: money(r.wage) ?? '—', num: true },
           r.contractMonths !== null ? fmtTerm(r.contractMonths) : '—',
-          { text: r.low !== null ? moneyShort(r.low) : r.offMarket ? 'beyond' : '—', num: true },
-          { text: r.mid !== null ? moneyShort(r.mid) : r.offMarket ? 'the market' : '—', num: true },
-          { text: r.high !== null ? moneyShort(r.high) : r.offMarket ? '↑' : '—', num: true },
-        ]),
-      ),
-    );
-    panel.appendChild(
-      el('p', 'muted tiny', `Fitted on the ${sv.sample} deals this world has actually agreed — its own market, applied to your squad. Floor: walk away below it. Ask: open here. "Beyond the market" means he is bigger than any deal this world has done, so no honest number exists.`),
-    );
-  }
+          { text: r.ea ? moneyShort(r.ea.floor) : '—', num: true },
+          { text: r.ea ? moneyShort(r.ea.value) : '—', num: true, tier: r.ea && r.ea.value >= 50_000_000 ? 90 : r.ea && r.ea.value >= 20_000_000 ? 85 : undefined },
+          { text: r.ea ? moneyShort(r.ea.ceiling) : '—', num: true },
+          {
+            text: r.mid !== null ? `${moneyShort(r.low)}–${moneyShort(r.high)}` : r.offMarket ? 'beyond it' : '—',
+            num: true,
+            title: r.mid !== null
+              ? `Fitted on the ${sv.sample} deals this world has actually agreed`
+              : sv.modelled
+                ? 'Bigger than any deal this world has done'
+                : `No priced deals in this world yet (${sv.sample}) — the column fills in as the window does business`,
+          },
+        ];
+      }),
+    ),
+  );
   frag.appendChild(panel);
   return frag;
 }
@@ -2570,9 +2827,26 @@ function renderManagerOffice(doc) {
 function renderManagerMarket(doc) {
   const frag = document.createDocumentFragment();
   const c = doc.coaching;
+  const all = c?.market ?? [];
   const panel = el('div', 'panel');
   panel.appendChild(el('h2', null, '🌍 Manager market'));
-  const rows = (c?.market ?? []).slice(0, 100);
+
+  const game = state.marketGame ?? 'men';
+  const counts = { men: all.filter((m) => m.game === 'men').length, women: all.filter((m) => m.game === 'women').length, other: all.filter((m) => m.game === 'other').length };
+  const chips = el('div', 'chiprow');
+  for (const [id, label] of [['men', `Men's game ${counts.men}`], ['women', `Women's game ${counts.women}`], ['other', `Unattached / other ${counts.other}`]]) {
+    const chip = el('button', `chip${game === id ? ' on' : ''}`, label);
+    activatable(chip, () => { state.marketGame = id; render(); }, { skipWhen: () => game === id });
+    chips.appendChild(chip);
+  }
+  panel.appendChild(chips);
+
+  const rows = all.filter((m) => m.game === game).slice(0, 80);
+  const starCell = (v) => ({
+    text: v === null ? '—' : '★'.repeat(Math.floor(v)) + (v % 1 ? '½' : ''),
+    cls: `stars m${Math.min(5, Math.max(1, Math.round(v ?? 1)))}`,
+    title: v === null ? undefined : `${v} stars — the game's own rating, decoded from the save`,
+  });
   if (rows.length) {
     panel.appendChild(
       table(
@@ -2583,15 +2857,15 @@ function renderManagerMarket(doc) {
           m.league ?? '—',
           `${flagFor(m.nation)}${m.nation ?? '—'}`,
           { text: m.age ?? '—', num: true },
-          { text: m.stars ?? '—', num: true, title: 'The game\u2019s own star rating, decoded from the save' },
+          starCell(m.stars),
         ]),
       ),
     );
     panel.appendChild(
-      el('p', 'muted tiny', `Top ${rows.length} of ${c?.market?.length ?? 0} real managers in this world, by the game's own star rating — national coaches and every league system included. Squad › Coach filters this down to poachable club managers.`),
+      el('p', 'muted tiny', `Top ${rows.length} of ${counts[game]} in this lane, by the game's own star rating. Squad › Coach filters the men's/women's split down to poachable club managers in your leagues.`),
     );
   } else {
-    panel.appendChild(el('p', 'muted tiny', 'No manager records in this save.'));
+    panel.appendChild(el('p', 'muted tiny', 'Nobody in this lane.'));
   }
   frag.appendChild(panel);
   return frag;
@@ -2623,20 +2897,31 @@ function renderFinances(doc) {
     ),
     'The game keeps live budgets in memory and writes zeros to disk (verified across saves) — "not persisted" is the honest reading, never a claim that you are broke.',
   );
-  panel(
-    '💼 The club',
-    table(
-      ['Measure', { label: 'Value', num: true }],
-      [
-        ['Club worth', val(f.clubWorth)],
-        ['Weekly wage bill', { text: money(f.wageBill ?? 0), num: true }],
-        ['Profitability', { text: f.profitability ?? '—', num: true, title: 'The game\u2019s own 1–10 scale' }],
-        ['Domestic prestige', { text: f.domesticPrestige ?? '—', num: true, title: '1–10' }],
-        ['International prestige', { text: f.internationalPrestige ?? '—', num: true, title: '1–10' }],
-        ['Youth development rating', { text: f.youthDevelopment ?? '—', num: true, title: 'The game\u2019s own 1–10 facility scale — it shapes what the academy produces' }],
-      ],
-    ),
-  );
+  {
+    const box = el('div');
+    box.appendChild(
+      table(
+        ['Measure', { label: 'Value', num: true }],
+        [
+          ['Club worth', val(f.clubWorth)],
+          ['Weekly wage bill', { text: money(f.wageBill ?? 0), num: true }],
+        ],
+      ),
+    );
+    const bars = el('div', 'bars');
+    const scale = (label, v, tip) => {
+      if (v === null || v === undefined) return;
+      const row = barRow(label, v, 10, v * 10);
+      if (tip) row.dataset.tip = tip;
+      bars.appendChild(row);
+    };
+    scale('Profitability', f.profitability, 'The game\u2019s own 1–10 scale.');
+    scale('Domestic prestige', f.domesticPrestige, 'How the country sees the club, 1–10.');
+    scale('International prestige', f.internationalPrestige, 'How the world sees the club, 1–10.');
+    scale('Youth development', f.youthDevelopment, 'The facility scale that shapes what the academy produces, 1–10.');
+    box.appendChild(bars);
+    panel('💼 The club', box);
+  }
   panel(
     '🧑‍💼 You',
     table(
@@ -2766,7 +3051,6 @@ const ordinal = (n) =>
 function storySvg(doc) {
   const f = bragFacts(doc);
   const W = 1080;
-  const H = 1350;
   const ACCENT = '#c9f24b';
   const INK = '#e8eef2';
   const DIM = '#8b98a5';
@@ -2782,8 +3066,9 @@ function storySvg(doc) {
         `</text>`,
     );
 
-  parts.push(`<rect width="${W}" height="${H}" fill="#0b0f14"/>`);
-  parts.push(`<rect x="0" y="0" width="${W}" height="6" fill="${ACCENT}"/>`);
+  // The background and footer are added at the end, once the content has
+  // decided how tall the card needs to be — a fixed height overflowed the
+  // moment the cabinet, the record and the absurd bit all showed up at once.
 
   // Header
   t(64, 110, `CAREER REPORT · SEASON ${doc.season ?? '?'}`, 26, ACCENT, 700, 'start', '0.2em');
@@ -2822,13 +3107,16 @@ function storySvg(doc) {
   for (const sn of f.seasons.slice(-5)) {
     const pos = ordinal(sn.position);
     const champion = sn.position === 1;
+    // Every family gets its own colour: season volt, position silver/bronze,
+    // W green, D grey, L red, points volt, goals green:red.
+    const posFill = champion ? ACCENT : sn.position === 2 ? '#cbd5e1' : sn.position === 3 ? '#d9a05b' : DIM;
     seg(64, y, 30, [
       { t: `S${sn.season}`, fill: ACCENT, w: 800 },
-      { t: champion ? '  🏆 CHAMPIONS' : pos ? `  ${pos}` : '  live', fill: champion ? ACCENT : DIM, w: 700, dx: 6 },
+      { t: champion ? '  🏆 CHAMPIONS' : pos ? `  ${pos}` : '  live', fill: posFill, w: 800, dx: 6 },
       { t: `  ${sn.wins}W`, fill: GREEN, w: 800, dx: 18 },
       { t: ` ${sn.draws}D`, fill: DIM, w: 700 },
       { t: ` ${sn.losses}L`, fill: RED, w: 800 },
-      { t: `  ${sn.points}`, fill: INK, w: 800, dx: 18 },
+      { t: `  ${sn.points}`, fill: ACCENT, w: 800, dx: 18 },
       { t: ' pts', fill: DIM, w: 600 },
       { t: `  ${sn.goalsFor}`, fill: GREEN, w: 800, dx: 18 },
       { t: ':', fill: DIM, w: 600 },
@@ -2880,11 +3168,13 @@ function storySvg(doc) {
     }
   }
 
-  // Footer
+  // Footer, then size the card to what it actually holds.
+  const H = Math.max(1350, y + 120);
   parts.push(`<line x1="64" y1="${H - 84}" x2="${W - 64}" y2="${H - 84}" stroke="#1e2732" stroke-width="2"/>`);
   t(64, H - 44, 'FC26 COMPANION · every number read from the save, nothing invented', 20, DIM, 600);
+  const chrome = `<rect width="${W}" height="${H}" fill="#0b0f14"/><rect x="0" y="0" width="${W}" height="6" fill="${ACCENT}"/>`;
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${parts.join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${chrome}${parts.join('')}</svg>`;
 }
 
 /** Social caption: plain text for pasting next to the image. */
@@ -3365,12 +3655,18 @@ function campaignLine(doc) {
 
 function renderCentral(doc) {
   const frag = document.createDocumentFragment();
-  const grid = el('div', 'grid');
-  const panel = (title, node, cls) => {
-    const p2 = el('div', `panel${cls ? ` ${cls}` : ''}`);
+  const wrap = el('div', 'central');
+  const colMain = el('div', 'central-main');
+  const colSide = el('div', 'central-side');
+  wrap.appendChild(colMain);
+  wrap.appendChild(colSide);
+  frag.appendChild(wrap);
+
+  const panel = (col, title, node) => {
+    const p2 = el('div', 'panel');
     p2.appendChild(el('h2', null, title));
     p2.appendChild(node);
-    grid.appendChild(p2);
+    col.appendChild(p2);
     return p2;
   };
   const go = (view, sub) => {
@@ -3386,13 +3682,19 @@ function renderCentral(doc) {
     });
     return b;
   };
+  const todoRow = (box, label, who, why) => {
+    const row = el('div', 'todo');
+    row.appendChild(el('b', null, label));
+    row.appendChild(el('span', 'who', who));
+    row.appendChild(el('span', 'why', why ?? ''));
+    box.appendChild(row);
+  };
 
-  // --- the season, one line
   const cur = doc.seasons[doc.seasons.length - 1];
+
+  // ---------- main column: the season, the tables, the world ----------
   {
     const box = el('div');
-    // The game's first screen leads with the day. Ours leads with the estimate
-    // the save supports, plus the windows that decide what this week means.
     if (doc.gameDate) {
       const d = new Date(Math.floor(doc.gameDate / 10000), Math.floor((doc.gameDate % 10000) / 100) - 1, doc.gameDate % 100);
       const bar = el('div', 'datebar');
@@ -3402,7 +3704,7 @@ function renderCentral(doc) {
       bar.appendChild(day);
       bar.appendChild(el('span', 'dateyear', String(Math.floor(doc.gameDate / 10000))));
       for (const w of doc.calendar?.windows ?? []) {
-        bar.appendChild(el('span', `chip winchip${w.openNow ? ' on' : ''}`, `${w.label} ${w.opens} → ${w.closes}${w.openNow ? ' · OPEN' : w.openNow === false ? '' : ''}`));
+        bar.appendChild(el('span', `chip winchip${w.openNow ? ' on' : ''}`, `${w.label} ${w.opens} → ${w.closes}${w.openNow ? ' · OPEN' : ''}`));
       }
       box.appendChild(bar);
     }
@@ -3431,48 +3733,9 @@ function renderCentral(doc) {
       }
       box.appendChild(wdl);
     }
-    panel(`📈 Season ${doc.season}`, box, 'span2');
+    panel(colMain, `📈 Season ${doc.season}`, box);
   }
 
-  // --- what needs a decision
-  {
-    const box = el('div');
-    const alerts = doc.alerts.slice(0, 5);
-    for (const a of alerts) {
-      const row = el('div', 'todo');
-      row.appendChild(el('b', null, a.tag));
-      row.appendChild(el('span', 'who', a.playerName));
-      row.appendChild(el('span', 'why', a.line));
-      box.appendChild(row);
-    }
-    if (doc.alerts.length > 5) box.appendChild(el('p', 'muted tiny', `+${doc.alerts.length - 5} more in the rail.`));
-    if (!alerts.length) box.appendChild(el('p', 'muted tiny', 'Nothing needs you. Enjoy it.'));
-    panel(`🔔 Decisions — ${doc.alerts.length}`, box);
-  }
-
-  // --- treatment room: who is out and who steps in
-  if (settings.treatment) {
-    const t2 = doc.treatment ?? { injured: [], suspended: [] };
-    const box = el('div');
-    for (const r of t2.injured) {
-      const row = el('div', 'todo');
-      row.appendChild(el('b', null, '🩹 Injured'));
-      row.appendChild(el('span', 'who', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`));
-      row.appendChild(el('span', 'why', `${r.daysOut !== null ? `out ~${r.daysOut} days` : 'length unrecorded'}${r.replacement ? ` — step in: ${r.replacement.name} (fit ${r.replacement.fit})` : ''}`));
-      box.appendChild(row);
-    }
-    for (const r of t2.suspended) {
-      const row = el('div', 'todo');
-      row.appendChild(el('b', null, '🟥 Suspended'));
-      row.appendChild(el('span', 'who', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`));
-      row.appendChild(el('span', 'why', r.replacement ? `step in: ${r.replacement.name} (fit ${r.replacement.fit})` : ''));
-      box.appendChild(row);
-    }
-    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'Everyone fit, nobody banned. The physio room is empty.'));
-    panel('🏥 Treatment room', box);
-  }
-
-  // --- the league table, from the save itself
   if (settings.leagueTable && doc.leagueTable?.rows?.length) {
     const lt = doc.leagueTable;
     const v = (x) => ({ text: lt.started ? x : '—', num: true });
@@ -3480,10 +3743,10 @@ function renderCentral(doc) {
     box.appendChild(
       table(
         [{ label: '#', num: true }, 'Club', { label: 'P', num: true }, { label: 'W', num: true }, { label: 'D', num: true }, { label: 'L', num: true }, { label: 'GF', num: true }, { label: 'GA', num: true }, { label: 'GD', num: true }, { label: 'Pts', num: true }],
-        lt.rows.map((r) => {
+        lt.rows.map((r, i) => {
           const you = r.isUser ? 'you' : '';
           return [
-            { text: r.position ?? '—', num: true, cls: you || undefined },
+            { text: i + 1, num: true, cls: you || undefined, title: r.position !== null && r.position !== i + 1 ? `The save stores position ${r.position}` : undefined },
             { text: `${r.name}${r.champion ? ' 👑' : ''}`, cls: you || undefined, title: r.champion ? 'Reigning champions' : undefined },
             { ...v(r.played), cls: you || undefined },
             { ...v(r.wins), cls: you || undefined },
@@ -3498,42 +3761,57 @@ function renderCentral(doc) {
         { tight: true },
       ),
     );
-    if (!lt.started) box.appendChild(el('p', 'muted tiny', 'No league match recorded yet this season — positions carry over in the save and the numbers fill in match by match.'));
-    panel(`🏟 ${lt.league ?? 'League table'}`, box, 'span2');
+    if (!lt.started) box.appendChild(el('p', 'muted tiny', 'No league match recorded yet this season — the order carries over from the save and the numbers fill in match by match.'));
+    panel(colMain, `🏟 ${lt.league ?? 'League table'}`, box);
   }
 
-  // --- competitions this season
   {
     const comps = (doc.board?.competitions ?? []).filter((c) => c.season === doc.season);
     if (comps.length) {
       const box = el('div');
       for (const c of comps) {
-        const row = el('div', 'todo');
-        row.appendChild(el('b', null, c.name));
-        row.appendChild(el('span', 'who', c.won ? '🏆 Won' : c.notStarted ? 'Not started yet' : c.result === 1 ? 'Objective met' : 'In progress'));
-        row.appendChild(el('span', 'why', ''));
-        box.appendChild(row);
+        todoRow(box, c.name, c.won ? '🏆 Won' : c.notStarted ? 'Not started yet' : c.result === 1 ? 'Objective met' : 'In progress', '');
       }
-      panel('🏆 Competitions', box);
+      box.appendChild(el('p', 'muted tiny', 'Cup brackets and group tables are not written to the save (verified) — progress and outcomes are.'));
+      panel(colMain, '🏆 Competitions', box);
     }
   }
 
-  // --- the world's news feed, from persistent_events
   if (settings.newsFeed && doc.calendar?.events?.length) {
     const box = el('div');
-    for (const e of doc.calendar.events.slice(0, 8)) {
-      const row = el('div', 'todo');
-      row.appendChild(el('b', null, fmtDate(e.date)));
-      row.appendChild(el('span', 'who', e.player ?? e.team1 ?? `event ${e.eventId}`));
-      row.appendChild(
-        el('span', 'why', e.eventId === 5 && e.team1 && e.team2 ? `${e.team1} → ${e.team2}` : e.team2 ? `${e.team1 ?? '?'} · ${e.team2}` : `event #${e.eventId}~`),
+    for (const e of doc.calendar.events.slice(0, 10)) {
+      todoRow(
+        box,
+        fmtDate(e.date),
+        e.player ?? e.team1 ?? `event ${e.eventId}`,
+        e.eventId === 5 && e.team1 && e.team2 ? `${e.team1} → ${e.team2}` : e.team2 ? `${e.team1 ?? '?'} · ${e.team2}` : `event #${e.eventId}~`,
       );
-      box.appendChild(row);
     }
-    panel('📰 Around the world', box);
+    panel(colMain, '📰 Around the world', box);
   }
 
-  // --- movers
+  // ---------- side column: what needs you ----------
+  {
+    const box = el('div');
+    for (const a of doc.alerts.slice(0, 5)) todoRow(box, a.tag, a.playerName, a.line);
+    if (doc.alerts.length > 5) box.appendChild(el('p', 'muted tiny', `+${doc.alerts.length - 5} more in the rail.`));
+    if (!doc.alerts.length) box.appendChild(el('p', 'muted tiny', 'Nothing needs you. Enjoy it.'));
+    panel(colSide, `🔔 Decisions — ${doc.alerts.length}`, box);
+  }
+
+  if (settings.treatment) {
+    const t2 = doc.treatment ?? { injured: [], suspended: [] };
+    const box = el('div');
+    for (const r of t2.injured) {
+      todoRow(box, '🩹 Injured', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`, `${r.daysOut !== null ? `out ~${r.daysOut} days` : 'length unrecorded'}${r.replacement ? ` — step in: ${r.replacement.name} (fit ${r.replacement.fit})` : ''}`);
+    }
+    for (const r of t2.suspended) {
+      todoRow(box, '🟥 Suspended', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`, r.replacement ? `step in: ${r.replacement.name} (fit ${r.replacement.fit})` : '');
+    }
+    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'Everyone fit, nobody banned. The physio room is empty.'));
+    panel(colSide, '🏥 Treatment room', box);
+  }
+
   {
     const box = el('div');
     const everyone = [...doc.senior, ...doc.academy];
@@ -3543,40 +3821,27 @@ function renderCentral(doc) {
       .slice(0, 4);
     const fallers = everyone.filter((p2) => p2.trend === 'dip' || p2.trend === 'fall').slice(0, 2);
     for (const p2 of [...movers, ...fallers]) {
-      const row = el('div', 'todo');
       const t2 = TREND[p2.trend];
-      row.appendChild(el('b', null, `${t2.glyph} ${p2.overallSeasonDelta > 0 ? '+' : ''}${p2.overallSeasonDelta}`));
-      row.appendChild(el('span', 'who', p2.name));
-      row.appendChild(el('span', 'why', `${p2.positionShort ?? ''} · ${p2.overall}${p2.potential && p2.potential !== p2.overall ? ` → ${p2.potential}` : ''}`));
-      box.appendChild(row);
+      todoRow(box, `${t2.glyph} ${p2.overallSeasonDelta > 0 ? '+' : ''}${p2.overallSeasonDelta}`, p2.name, `${p2.positionShort ?? ''} · ${p2.overall}${p2.potential && p2.potential !== p2.overall ? ` → ${p2.potential}` : ''}`);
     }
     if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'No movement yet this season.'));
-    panel('📊 Movers', box);
+    panel(colSide, '📊 Movers', box);
   }
 
-  // --- ceiling watch, contracts, loans: the pulse
   {
     const box = el('div');
-    const add2 = (label, who, why) => {
-      const row = el('div', 'todo');
-      row.appendChild(el('b', null, label));
-      row.appendChild(el('span', 'who', who));
-      row.appendChild(el('span', 'why', why));
-      box.appendChild(row);
-    };
     for (const r of doc.stats.ceilingWatch.slice(0, 2)) {
-      add2('Ceiling', r.name, `${r.delta > 0 ? '+' : ''}${r.delta} this season`);
+      todoRow(box, 'Ceiling', r.name, `${r.delta > 0 ? '+' : ''}${r.delta} this season`);
     }
     const dueNow = doc.wages.renewals.filter((r) => r.urgency === 'now');
-    if (dueNow.length) add2('Renewals', `${dueNow.length} due now`, 'Wages tab');
+    if (dueNow.length) todoRow(box, 'Renewals', `${dueNow.length} due now`, 'Squad › Wages');
     for (const r of (doc.loans.out ?? []).slice(0, 2)) {
-      add2('On loan', r.name, `Δ OVR ${r.overallDelta === null || r.overallDelta === undefined ? '—' : (r.overallDelta > 0 ? '+' : '') + r.overallDelta} at ${r.atTeamName ?? '?'}`);
+      todoRow(box, 'On loan', r.name, `Δ OVR ${r.overallDelta === null || r.overallDelta === undefined ? '—' : (r.overallDelta > 0 ? '+' : '') + r.overallDelta} at ${r.atTeamName ?? '?'}`);
     }
     if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'Quiet on every front.'));
-    panel('🩺 Pulse', box);
+    panel(colSide, '🩺 Pulse', box);
   }
 
-  // --- next opponent snapshot
   {
     const box = el('div');
     const mine = doc.opponents?.find((o) => o.teamId === doc.club?.id);
@@ -3595,10 +3860,9 @@ function renderCentral(doc) {
       box.appendChild(el('p', 'muted tiny', 'Pick your next opponent under Squad › Team Management and the line-by-line edge lands here.'));
     }
     box.appendChild(go('squad', 'tactics'));
-    panel(settings.rpg ? '⚔ Next fixture' : '🔎 Opponent', box);
+    panel(colSide, settings.rpg ? '⚔ Next fixture' : '🔎 Opponent', box);
   }
 
-  // --- the campaign arc, at a glance
   if (settings.rpg) {
     const box = el('div');
     const ladder = campaignLadder(doc, campaign.type);
@@ -3628,10 +3892,9 @@ function renderCentral(doc) {
       }
     }
     box.appendChild(go('story'));
-    panel('🎲 Campaign', box);
+    panel(colSide, '🎲 Campaign', box);
   }
 
-  frag.appendChild(grid);
   return frag;
 }
 
@@ -3747,55 +4010,93 @@ function renderShortlist(doc) {
 
 function renderSettings() {
   const frag = document.createDocumentFragment();
-  const panel = el('div', 'panel');
-  panel.appendChild(el('h2', null, '⚙ Customise'));
-  panel.appendChild(el('p', 'muted', 'Switches persist in this browser. Nothing here touches the save or the store.'));
-  let lastGroup = null;
-  for (const def of SETTING_DEFS) {
-    if (def.group && def.group !== lastGroup) {
-      lastGroup = def.group;
-      panel.appendChild(el('span', 'lbl-row', def.group.toUpperCase()));
-    }
-    const row = el('div', 'setrow');
-    const sw = el('button', `switch${settings[def.key] ? ' on' : ''}`);
-    sw.appendChild(el('i', 'knob'));
-    activatable(sw, () => {
-      settings[def.key] = !settings[def.key];
+  const intro = el('div', 'panel');
+  intro.appendChild(el('h2', null, '⚙ Customise'));
+  intro.appendChild(el('p', 'muted', 'Everything here lives in this browser. Nothing touches the save, the store, or the network.'));
+
+  // Landing tab: chips, not a switch.
+  const landRow = el('div', 'setrow');
+  const landTxt = el('div', 'settext');
+  landTxt.appendChild(el('b', null, 'Landing tab'));
+  landTxt.appendChild(el('span', 'muted tiny', 'Where Companion opens. "Last used" follows you around instead.'));
+  const landChips = el('div', 'chiprow');
+  const landing = typeof settings.landing === 'string' ? settings.landing : null;
+  for (const [id, label] of [[null, 'Last used'], ...LANDING_CHOICES.map((v2) => [v2, VIEWS[v2].label])]) {
+    const chip = el('button', `chip${landing === id ? ' on' : ''}`, label);
+    activatable(chip, () => {
+      if (id === null) delete settings.landing;
+      else settings.landing = id;
       saveSettings();
       render();
-    });
-    row.appendChild(sw);
-    const txt = el('div', 'settext');
-    txt.appendChild(el('b', null, def.label));
-    txt.appendChild(el('span', 'muted tiny', def.note));
-    if (def.key === 'rpg' && settings.rpg) {
-      const chips = el('div', 'chiprow');
-      for (const [key, cdef] of Object.entries(CAMPAIGNS)) {
-        const chip = el('button', `chip${campaign.type === key ? ' on' : ''}`, cdef.name);
-        chip.dataset.tip = cdef.blurb;
-        activatable(chip, () => { campaign.type = key; saveCampaign(); render(); }, { skipWhen: () => campaign.type === key });
-        chips.appendChild(chip);
-      }
-      txt.appendChild(chips);
-      if (campaign.type === 'custom' && state.doc) {
-        const lchips = el('div', 'chiprow');
-        for (const c of rpgChallenges(state.doc)) {
-          const on = campaign.levers.includes(c.name);
-          const chip = el('button', `chip${on ? ' on' : ''}`, c.name);
-          activatable(chip, () => {
-            campaign.levers = on ? campaign.levers.filter((n2) => n2 !== c.name) : [...campaign.levers, c.name];
-            saveCampaign();
-            render();
-          });
-          lchips.appendChild(chip);
-        }
-        txt.appendChild(lchips);
-      }
-    }
-    row.appendChild(txt);
-    panel.appendChild(row);
+    }, { skipWhen: () => landing === id });
+    landChips.appendChild(chip);
   }
-  frag.appendChild(panel);
+  landTxt.appendChild(landChips);
+  landRow.appendChild(landTxt);
+  intro.appendChild(landRow);
+  frag.appendChild(intro);
+
+  const grid = el('div', 'setgrid');
+  const groups = [...new Set(SETTING_DEFS.map((d) => d.group))];
+  const GROUP_ICON = { Display: '🖥', Central: '🏠', Guidance: '🧭', Preferences: '🎛', Modes: '🎮' };
+  for (const g of groups) {
+    const card = el('div', 'panel');
+    card.appendChild(el('h2', null, `${GROUP_ICON[g] ?? ''} ${g}`));
+    for (const def of SETTING_DEFS.filter((d) => d.group === g)) {
+      const row = el('div', 'setrow');
+      const sw = el('button', `switch${settings[def.key] ? ' on' : ''}`);
+      sw.appendChild(el('i', 'knob'));
+      activatable(sw, () => {
+        settings[def.key] = !settings[def.key];
+        saveSettings();
+        render();
+      });
+      row.appendChild(sw);
+      const txt = el('div', 'settext');
+      txt.appendChild(el('b', null, def.label));
+      txt.appendChild(el('span', 'muted tiny', def.note));
+      if (def.key === 'rpg' && settings.rpg) {
+        const chips = el('div', 'chiprow');
+        for (const [key, cdef] of Object.entries(CAMPAIGNS)) {
+          const chip = el('button', `chip${campaign.type === key ? ' on' : ''}`, cdef.name);
+          chip.dataset.tip = cdef.blurb;
+          activatable(chip, () => { campaign.type = key; saveCampaign(); render(); }, { skipWhen: () => campaign.type === key });
+          chips.appendChild(chip);
+        }
+        txt.appendChild(chips);
+        if (campaign.type === 'custom' && state.doc) {
+          const lchips = el('div', 'chiprow');
+          for (const c of rpgChallenges(state.doc)) {
+            const on = campaign.levers.includes(c.name);
+            const chip = el('button', `chip${on ? ' on' : ''}`, c.name);
+            activatable(chip, () => {
+              campaign.levers = on ? campaign.levers.filter((n2) => n2 !== c.name) : [...campaign.levers, c.name];
+              saveCampaign();
+              render();
+            });
+            lchips.appendChild(chip);
+          }
+          txt.appendChild(lchips);
+        }
+      }
+      if (def.key === 'ai' && settings.ai) {
+        txt.appendChild(
+          el('p', 'muted tiny', 'Status: not wired yet. The AI layer (docs/ai-features.md) needs a local model or an API key before it can say anything — until then this switch only reserves the seat.'),
+        );
+      }
+      row.appendChild(txt);
+      card.appendChild(row);
+    }
+    grid.appendChild(card);
+  }
+  frag.appendChild(grid);
+
+  const foot = el('div', 'panel');
+  foot.appendChild(el('h2', null, '🧾 The contract'));
+  foot.appendChild(
+    el('p', 'muted tiny', 'Companion reads the save, never writes it. Real data only — a fact the save does not carry renders as unknown, and anything derived wears a ~. Local only: the server binds to this machine unless you started it with --lan, and even then it only speaks to your own network.'),
+  );
+  frag.appendChild(foot);
   return frag;
 }
 
@@ -3992,6 +4293,7 @@ ${a.evidence}  [${a.rule}]`;
 
 function render() {
   window.__doc = state.doc;
+  document.body.classList.toggle('compact', !!settings.compact);
   // The game saves constantly while you play and every save re-renders this
   // page — without restoring scroll, a phone reading a player card snaps back
   // to the top mid-read and the lower groups look like they never render.
@@ -4061,7 +4363,12 @@ function wire() {
       localStorage.setItem('subs', JSON.stringify(state.subs));
     }
   }
-  state.view = storedPref('view', Object.keys(VIEWS), 'central');
+  // The landing preference decides where a fresh open starts; without one,
+  // the last-used tab wins as before.
+  state.view =
+    typeof settings.landing === 'string' && VIEWS[settings.landing]
+      ? settings.landing
+      : storedPref('view', Object.keys(VIEWS), 'central');
   state.sort = storedPref('sort', Object.keys(SORTS), 'ingame');
   state.filters = new Set(
     [...state.filters].filter((id) => FILTERS.some((f) => f.id === id)),

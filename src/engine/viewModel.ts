@@ -66,6 +66,7 @@ import { affinityIndex, eligibleClubs, findTargets, type TransferSearch } from '
 import { buildRegenReport, type RegenReport } from './regens.ts';
 import { recommendRoles, type RoleRecommendation } from './setpieces.ts';
 import { buildLoans, type LoansView } from './loans.ts';
+import { eaValue, type EaValueBand } from './eaValue.ts';
 import { buildDealsModel, type DealsModel } from './deals.ts';
 
 const num = (row: Row | undefined, key: string): number | null =>
@@ -312,6 +313,8 @@ export interface ViewDocument {
       nation: string | null;
       age: number | null;
       stars: number | null;
+      /** Which game their club belongs to: men's, women's, or unlinked. */
+      game: 'men' | 'women' | 'other';
     }[];
     /** Best-rated managers not at your club — the Live Editor target-coach pool. */
     targets: { managerId: number; name: string; club: string | null; stars: number | null; age: number | null }[];
@@ -348,8 +351,28 @@ export interface ViewDocument {
       high: number | null;
       /** True when the player is priced beyond any deal this world has done. */
       offMarket: boolean;
+      /** EA-style valuation band (eaValue.ts) — the game's own idea of fair. */
+      ea: EaValueBand | null;
     }[];
   };
+  /**
+   * Scout-report prospects: in career_youthplayers but with no squad link and
+   * no contract — the game wrote the report to disk before you signed anyone.
+   */
+  academyReports: {
+    playerId: number;
+    name: string;
+    age: number | null;
+    pos: string | null;
+    overall: number | null;
+    potential: number | null;
+    potentialVariance: number | null;
+    tier: number | null;
+    monthsListed: number | null;
+    nation: string | null;
+    verdict: 'sign' | 'watch' | 'pass';
+    why: string;
+  }[];
   /** The transfer shortlist exactly as the game saved it (career blob `mssm`). */
   shortlistIngame: {
     readable: boolean;
@@ -363,7 +386,10 @@ export interface ViewDocument {
       age: number | null;
       overall: number | null;
       potential: number | null;
+      /** What this world's own deals would pay (deals model). */
       fee: { low: number; mid: number; high: number } | null;
+      /** EA-style valuation band — the game's own idea of fair. */
+      ea: EaValueBand | null;
     }[];
   };
   warnings: string[];
@@ -1124,6 +1150,20 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     { gender: careerGender },
   );
 
+  // The fee guide the user asked for is EA's own idea of fair, not just what
+  // this world has happened to pay — attach the EA band to every target.
+  for (const t2 of transfers.targets as unknown as { playerId: number; ea?: EaValueBand | null }[]) {
+    const row = players.get(t2.playerId);
+    t2.ea = row
+      ? eaValue(
+          num(row, 'overallrating'),
+          ageAt(num(row, 'birthdate'), gameDate.date),
+          num(row, 'potential'),
+          num(row, 'preferredposition1'),
+        )
+      : null;
+  }
+
   const leagueNameOf = new Map<number, string>();
   for (const l of rowsOf(tables, 'leagues')) {
     const id = num(l, 'leagueid');
@@ -1387,16 +1427,26 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     wage: num(mi, 'wage'),
     objectivesSet: [1, 2, 3].filter((n) => (num(mi, `seasonobjective${n}`) ?? 0) !== 0).length,
     competitions: rowsOf(tables, 'career_competitionprogress')
-      .map((r) => ({
-        name:
-          typeof r['compshortname'] === 'string' && r['compshortname']
-            ? (input.competitions?.get(r['compshortname']) ?? r['compshortname'])
-            : (leagueNameOf.get(num(rowsOf(tables, 'career_users')[0], 'leagueid') ?? -1) ?? 'League campaign'),
-        season: num(r, 'season') ?? 0,
-        won: (num(r, 'hasteamwon') ?? 0) !== 0,
-        result: num(r, 'cup_objective_result'),
-        notStarted: num(r, 'stageid') === -1,
-      }))
+      .map((r) => {
+        // Codes name themselves through competitions.csv. Of the blank-code
+        // rows, only the one recurring every season (compobjid 808 here) is
+        // the league campaign; any other blank is an unmapped competition and
+        // says so instead of wearing the league's name.
+        const code = typeof r['compshortname'] === 'string' ? r['compshortname'] : '';
+        const objId = num(r, 'compobjid');
+        const name = code
+          ? (input.competitions?.get(code) ?? code)
+          : objId === 808
+            ? (leagueNameOf.get(num(rowsOf(tables, 'career_users')[0], 'leagueid') ?? -1) ?? 'League campaign')
+            : `Competition #${objId}~`;
+        return {
+          name,
+          season: num(r, 'season') ?? 0,
+          won: (num(r, 'hasteamwon') ?? 0) !== 0,
+          result: num(r, 'cup_objective_result'),
+          notStarted: num(r, 'stageid') === -1,
+        };
+      })
       .sort((a, b) => b.season - a.season),
     bigWin: scoreline('win'),
     bigLoss: scoreline('loss'),
@@ -1530,12 +1580,23 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     const f = buf.readFloatLE(0);
     return f >= 0 && f <= 5 ? Math.round(f * 2) / 2 : null;
   };
+  const teamGender = new Map<number, number>();
+  for (const tm of rowsOf(tables, 'teams')) {
+    const id = num(tm, 'teamid');
+    if (id !== null) teamGender.set(id, num(tm, 'gender') ?? 0);
+  }
   const market = rowsOf(tables, 'manager')
     .map((m) => {
       const teamId = num(m, 'teamid');
       const nameStr =
         (typeof m['commonname'] === 'string' && m['commonname']) ||
         [m['firstname'], m['surname']].filter((v) => typeof v === 'string' && v).join(' ');
+      const game: 'men' | 'women' | 'other' =
+        teamId !== null && teamGender.has(teamId)
+          ? teamGender.get(teamId) === 1
+            ? 'women'
+            : 'men'
+          : 'other';
       return {
         managerId: num(m, 'managerid') ?? -1,
         name: nameStr || `manager ${num(m, 'managerid')}`,
@@ -1544,6 +1605,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         nation: nationName(num(m, 'nationality')),
         age: ageAt(num(m, 'birthdate'), gameDate.date),
         stars: starOf(num(m, 'starrating')),
+        game,
         teamId,
       };
     })
@@ -1602,9 +1664,10 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
           mid: est?.mid ?? null,
           high: est?.high ?? null,
           offMarket: dealsModel.estimate !== null && est === null,
+          ea: eaValue(p.overall, p.age, p.potential, p.positionCode),
         };
       })
-      .sort((a, b) => (b.mid ?? 0) - (a.mid ?? 0)),
+      .sort((a, b) => (b.ea?.value ?? b.mid ?? 0) - (a.ea?.value ?? a.mid ?? 0)),
   };
 
   // --- the in-game shortlist (career blob mssm) -------------------------------
@@ -1640,9 +1703,93 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         overall: num(row, 'overallrating'),
         potential: num(row, 'potential'),
         fee: est ? { low: est.low, mid: est.mid, high: est.high } : null,
+        ea: row
+          ? eaValue(
+              num(row, 'overallrating'),
+              ageAt(num(row, 'birthdate'), gameDate.date),
+              num(row, 'potential'),
+              num(row, 'preferredposition1'),
+            )
+          : null,
       };
     }),
   };
+
+  // --- scout-report prospects: written to disk before you sign them -----------
+  // A youthplayers row whose player sits in the free-agent pool with no
+  // contract is a report entry, not a squad member (verified 2026-08-29: the
+  // fresh tier-3 report lived at "NG - FA" while the signed prospects carried
+  // youth-team links, and a stale row pointed at a player long since poached).
+  const faLeagues = new Set<number>();
+  for (const l of rowsOf(tables, 'leagues')) {
+    const nm = l['leaguename'];
+    if (typeof nm === 'string' && /free agents/i.test(nm)) {
+      const id = num(l, 'leagueid');
+      if (id !== null) faLeagues.add(id);
+    }
+  }
+  const faTeams = new Set<number>();
+  for (const l of rowsOf(tables, 'leagueteamlinks')) {
+    const lg = num(l, 'leagueid');
+    const tid = num(l, 'teamid');
+    if (lg !== null && tid !== null && faLeagues.has(lg)) faTeams.add(tid);
+  }
+  const linkedAnywhere = new Set<number>();
+  for (const l of rowsOf(tables, 'teamplayerlinks')) {
+    const pid = num(l, 'playerid');
+    const tid = num(l, 'teamid');
+    if (pid !== null && tid !== null && !faTeams.has(tid)) linkedAnywhere.add(pid);
+  }
+  const academyPotentials = academy.map((p2) => p2.potential ?? 0).sort((a, b) => a - b);
+  const academyMedianPot = academyPotentials.length
+    ? academyPotentials[Math.floor(academyPotentials.length / 2)]!
+    : null;
+  const thinSlotSet = new Set(transfers.gaps.filter((g) => g.severity !== 'none').map((g) => g.slot));
+  const academyReports = rowsOf(tables, 'career_youthplayers')
+    .filter((y) => {
+      const pid = num(y, 'playerid');
+      return pid !== null && !linkedAnywhere.has(pid) && !contracts.has(pid) && players.has(pid);
+    })
+    .map((y) => {
+      const pid = num(y, 'playerid')!;
+      const row = players.get(pid)!;
+      const pot = num(row, 'potential');
+      const ovr = num(row, 'overallrating');
+      const age = ageAt(num(row, 'birthdate'), gameDate.date);
+      const slot = slotOf(num(row, 'preferredposition1'));
+      const variance = num(y, 'potentialvariance');
+      const thin = slot !== null && thinSlotSet.has(slot);
+      const aboveAcademy = pot !== null && academyMedianPot !== null && pot >= academyMedianPot;
+      let verdict: 'sign' | 'watch' | 'pass';
+      let why: string;
+      if (pot !== null && (pot >= 84 || (aboveAcademy && thin))) {
+        verdict = 'sign';
+        why = pot >= 84
+          ? `A ${pot} ceiling is first-team material — sign before the report expires.`
+          : `Ceiling ${pot} beats your academy median (${academyMedianPot}) and ${slot} is thin.`;
+      } else if (pot !== null && academyMedianPot !== null && pot < academyMedianPot - 4 && !thin) {
+        verdict = 'pass';
+        why = `Ceiling ${pot} sits under everything already in the academy (median ${academyMedianPot}) at a position you cover.`;
+      } else {
+        verdict = 'watch';
+        why = `${pot ?? '?'} ceiling${variance ? ` with ±${variance} variance` : ''} — worth a signing only if the intake stays thin this cycle.`;
+      }
+      return {
+        playerId: pid,
+        name: nameOf(pid),
+        age,
+        pos: positionShort(num(row, 'preferredposition1')),
+        overall: ovr,
+        potential: pot,
+        potentialVariance: variance,
+        tier: num(y, 'playertier'),
+        monthsListed: num(y, 'monthsinsquad'),
+        nation: nationName(num(row, 'nationality')),
+        verdict,
+        why,
+      };
+    })
+    .sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0));
 
   const regens = buildRegenReport({
     players,
@@ -1779,6 +1926,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     finances,
     sellValues,
     shortlistIngame,
+    academyReports,
     warnings,
   };
 }
