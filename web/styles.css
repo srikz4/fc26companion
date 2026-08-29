@@ -327,7 +327,23 @@ main { padding: 14px 16px 64px; }
 
 /* ============================================================ tables */
 
-.table-wrap { overflow-x: auto; margin-top: 8px; }
+/*
+ * A wide table scrolls sideways inside its own box.
+ *
+ * On a phone that scrollbar sat on top of the last row, so the bottom player in
+ * a list could not be tapped: the finger landed on the bar. The gutter below
+ * gives the bar somewhere of its own to be, and `pan-y` keeps a tap a tap —
+ * without it the browser waits to see whether a touch is the start of a
+ * horizontal drag, and swallows short presses on the way.
+ */
+.table-wrap {
+  overflow-x: auto; margin-top: 8px;
+  padding-bottom: 6px;
+  touch-action: pan-x pan-y;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.table-wrap::-webkit-scrollbar { height: 6px; }
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
 th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-faint); font-weight: 700; }

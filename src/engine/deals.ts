@@ -31,6 +31,9 @@ export interface DealRecord {
   wage: number | null;
   toTeamId: number | null;
   toTeamName: string | null;
+  /** The club selling. */
+  fromTeamId: number | null;
+  fromTeamName: string | null;
   overall: number | null;
   potential: number | null;
   age: number | null;
@@ -89,7 +92,14 @@ export function buildDealsModel(
     if (playerId === null || fee === null || fee <= 0) continue;
 
     const player = playerById.get(playerId);
-    const toTeamId = num(row, 'teamid');
+    /**
+     * `offerteamid` is the club doing the buying; `teamid` is the club being
+     * bought from. Reading the seller as the destination had every deal
+     * pointing the wrong way — Henrichs "to AS Monaco" when Monaco were selling
+     * him to Everton.
+     */
+    const toTeamId = num(row, 'offerteamid');
+    const fromTeamId = num(row, 'teamid');
     deals.push({
       playerId,
       name: nameOf(playerId),
@@ -97,6 +107,8 @@ export function buildDealsModel(
       wage: num(row, 'offeredwage'),
       toTeamId,
       toTeamName: toTeamId === null ? null : (teamNames.get(toTeamId) ?? null),
+      fromTeamId,
+      fromTeamName: fromTeamId === null ? null : (teamNames.get(fromTeamId) ?? null),
       overall: num(player, 'overallrating'),
       potential: num(player, 'potential'),
       age: player ? ageOf(player) : null,

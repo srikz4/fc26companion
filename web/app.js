@@ -2286,6 +2286,41 @@ function renderSynergy(doc) {
   return frag;
 }
 
+/**
+ * What to open with, what it will probably take, and when to walk.
+ *
+ * Two different questions get two different numbers, and conflating them is
+ * what made the old screen useless. The EA value is what the player is WORTH —
+ * the game's own valuation curve. What a selling club will ACCEPT is a separate
+ * thing, usually lower, and the only honest evidence for it is what clubs in
+ * this world have actually paid: the fees on completed deals, which the save
+ * records in full.
+ *
+ * So the band comes from those deals, not from the valuation. Open at the low
+ * end, expect the middle, and treat the top as the point where you are paying
+ * over the odds for this profile in this world. The sample is stated because
+ * with a couple of dozen deals the band is wide, and a wide band honestly
+ * labelled beats a confident single number.
+ */
+function negotiationRows(sel) {
+  const g = sel?.feeGuide;
+  if (!g) {
+    return [
+      [
+        'What to offer',
+        null,
+        'No completed deal in this world is close enough to his profile to price him from. The EA value stands, but what a club would accept for him is not something this save can yet show.',
+      ],
+    ];
+  }
+  const spread = g.high > g.low ? Math.round(((g.high - g.low) / g.mid) * 100) : 0;
+  return [
+    ['Open at', moneyShort(g.low), `The least this world has paid for a player of his profile, across ${g.sample} completed deals. A first offer, not an insult.`],
+    ['Likely to take', moneyShort(g.mid), `The middle of what this world pays for this profile. Budget for this.`],
+    ['Over the odds above', moneyShort(g.high), `Past this you are paying more than any comparable deal in this world. The band is ${spread}% wide on ${g.sample} deals — treat it as a direction, not a price tag.`],
+  ];
+}
+
 function renderTransfers(doc) {
   const frag = document.createDocumentFragment();
   const quests0 = questStrip(doc, 'transfers/targets');
@@ -2360,6 +2395,7 @@ function renderTransfers(doc) {
         ['Fit here', sel?.fit ?? null, 'Our rating for him in the slot he would fill.'],
         ['Upgrade', sel && sel.upgrade > 0 ? `+${Math.round(sel.upgrade * 10) / 10}` : null, 'How much better his fit is than your best in that slot.'],
         ['Synergy', sel?.synergy?.[0]?.strength ?? null, sel?.synergy?.[0]?.channel],
+        ...negotiationRows(sel),
       ]),
     );
   }
@@ -3223,11 +3259,38 @@ function renderSquadViews(doc, source, title) {
  * The shortlist as the game saved it: read from the save's own blob section,
  * cracked by shortlisting known players and diffing the bytes.
  */
+/** Whole days between two YYYYMMDD stamps. */
+function daysBetweenYmd(from, to) {
+  const asUtc = (v) => Date.UTC(Math.floor(v / 10000), Math.floor((v % 10000) / 100) - 1, v % 100);
+  const d = (asUtc(to) - asUtc(from)) / 86400000;
+  return Number.isFinite(d) ? d : null;
+}
+
 function renderIngameShortlist(doc) {
   const frag = document.createDocumentFragment();
   const sl = doc.shortlistIngame;
   const panel = el('div', 'panel');
-  panel.appendChild(el('h2', null, '⭐ Shortlist — from the game'));
+  panel.appendChild(el('h2', null, 'Shortlist — from the game'));
+  /**
+   * The save stamps its shortlist with the day it was written, and the game
+   * does not rewrite that section every time you save — measured at four months
+   * stale on a live career. So a player you have just dropped in game can still
+   * be here, and the honest thing is to date the list rather than let it look
+   * current.
+   */
+  if (sl?.readable && sl.date) {
+    const behind = doc.gameDate ? daysBetweenYmd(sl.date, doc.gameDate) : null;
+    panel.appendChild(
+      el(
+        'p',
+        'muted tiny',
+        `As the save has it, written ${fmtDate(sl.date)}` +
+          (behind !== null && behind > 21
+            ? ` — about ${Math.round(behind / 30)} month${Math.round(behind / 30) === 1 ? '' : 's'} behind today. The game rewrites this section rarely, so anything you have added or dropped since may not show yet.`
+            : '. The game rewrites this section only now and then, so a very recent change may not show yet.'),
+      ),
+    );
+  }
   if (!sl?.readable) {
     panel.appendChild(
       el('p', 'muted', 'The shortlist section of this save could not be read. It lives outside the database block, and when its layout shifts Companion says so rather than guessing.'),
@@ -5042,11 +5105,25 @@ function renderCentral(doc) {
   if (settings.treatment) {
     const t2 = doc.treatment ?? { injured: [], suspended: [] };
     const box = el('div');
+    // Cover is only offered for someone who was going to play. A player you
+    // have already dropped to the reserves leaves no gap, so naming a
+    // replacement for him would be inventing a problem to solve.
+    const why = (r) =>
+      r.replacement
+        ? `step in: ${r.replacement.name} (fit ${r.replacement.fit})`
+        : r.selected
+          ? 'no cover free outside the XI'
+          : 'not in your XI — no cover needed';
     for (const r of t2.injured) {
-      todoRow(box, '🩹 Injured', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`, `${r.daysOut !== null ? `out ~${r.daysOut} days` : 'length unrecorded'}${r.replacement ? ` — step in: ${r.replacement.name} (fit ${r.replacement.fit})` : ''}`);
+      todoRow(
+        box,
+        'Injured',
+        `${r.name}${r.pos ? ` · ${r.pos}` : ''}`,
+        `${r.daysOut !== null ? `out ~${r.daysOut} days` : 'length unrecorded'} — ${why(r)}`,
+      );
     }
     for (const r of t2.suspended) {
-      todoRow(box, '🟥 Suspended', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`, r.replacement ? `step in: ${r.replacement.name} (fit ${r.replacement.fit})` : '');
+      todoRow(box, 'Suspended', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`, why(r));
     }
     if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'No injuries, no suspensions.'));
     panel(colSide, '🏥 Treatment room', box);

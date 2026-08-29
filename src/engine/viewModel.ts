@@ -387,14 +387,18 @@ export interface ViewDocument {
       name: string;
       pos: string | null;
       overall: number | null;
-      /** career_playerlastgrowth.injuryduration, in days. Null when unrecorded. */
+      /** Days still to run. Null when the save does not record the injury's length. */
       daysOut: number | null;
+      /** Whether he was in the XI you saved — if not, there is no gap to fill. */
+      selected: boolean;
       replacement: { playerId: number; name: string; fit: number } | null;
     }[];
     suspended: {
       playerId: number;
       name: string;
       pos: string | null;
+      /** Whether he was in the XI you saved. */
+      selected: boolean;
       replacement: { playerId: number; name: string; fit: number } | null;
     }[];
   };
@@ -1939,18 +1943,22 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   const injuryDays = new Map<number, number>();
   for (const [pid, ends] of injuryEndsAt) injuryDays.set(pid, Math.max(0, ends - injuryToday));
   /**
-   * Who steps in, and why it must not be someone already picked.
+   * Who steps in — and when nobody needs to.
    *
-   * The point of the suggestion is to fill the hole the injury leaves. Naming a
-   * player who is already in the XI does not fill it — he cannot be in two
-   * places — it just moves the hole somewhere else and calls it solved. So the
-   * search is over players who are actually free: fit, and not already selected.
+   * Two rules, both learned the hard way. A replacement must not already be in
+   * the XI: he cannot be in two places, so naming him moves the hole rather
+   * than filling it. And there is only a hole to fill if the injured player was
+   * going to play. Someone dropped to the reserves is not leaving a gap in the
+   * team, so suggesting cover for him is noise — the injury is worth showing,
+   * the replacement is not.
    *
-   * If the whole XI is the only cover, the answer is that there is none, which
-   * is worth knowing.
+   * The save records the eleven and nothing else; the bench Companion shows
+   * elsewhere is its own suggestion, not the game's. So "was going to play"
+   * means the saved XI, which is the case that matters anyway.
    */
   const pickedAlready = new Set((savedXI?.players ?? []).map((pl) => pl.playerId));
   const standIn = (outId: number): { playerId: number; name: string; fit: number } | null => {
+    if (!pickedAlready.has(outId)) return null;
     const row = players.get(outId);
     const slot = row ? slotOf(num(row, 'preferredposition1')) : null;
     if (!slot) return null;
@@ -1974,6 +1982,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         pos: positionShort(num(players.get(pid), 'preferredposition1')),
         overall: num(players.get(pid), 'overallrating'),
         daysOut: injuryDays.get(pid) ?? null,
+        selected: pickedAlready.has(pid),
         replacement: standIn(pid),
       })),
     suspended: [...availability.entries()]
@@ -1982,6 +1991,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         playerId: pid,
         name: nameOf(pid),
         pos: positionShort(num(players.get(pid), 'preferredposition1')),
+        selected: pickedAlready.has(pid),
         replacement: standIn(pid),
       })),
   };
