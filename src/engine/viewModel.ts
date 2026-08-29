@@ -193,6 +193,8 @@ export interface ViewDocument {
   generatedAt: string;
   club: { id: number | null; name: string | null; overall: number | null };
   manager: string | null;
+  /** The career's own currency symbol, from career_managerpref.currency. */
+  currency: string;
   season: number | null;
   gameDate: number | null;
   gameDateBasis: string | null;
@@ -264,6 +266,7 @@ export interface ViewDocument {
       teamId: number;
       name: string;
       position: number | null;
+      prevPosition: number | null;
       played: number;
       wins: number;
       draws: number;
@@ -373,6 +376,36 @@ export interface ViewDocument {
     verdict: 'sign' | 'watch' | 'pass';
     why: string;
   }[];
+  /**
+   * Descriptive profiles for players outside your squad — everyone on the
+   * shopping list and everyone the game has shortlisted. Enough to open a real
+   * card on a target: the attribute sheet, the PlayStyles, what he is elite at.
+   * No advice: the rules are about YOUR squad, and pretending otherwise would
+   * be inventing a relationship that does not exist.
+   */
+  scoutProfiles: {
+    playerId: number;
+    name: string;
+    nation: string | null;
+    age: number | null;
+    positionShort: string | null;
+    preferredPositions: string[];
+    overall: number | null;
+    potential: number | null;
+    foot: 'Left' | 'Right' | null;
+    height: number | null;
+    weight: number | null;
+    skillMoves: number | null;
+    weakFoot: number | null;
+    groups: AttributeGroupView[];
+    playStyles: PlayStyle[];
+    standout: { attr: string; value: number; percentile: number }[];
+    teamName: string | null;
+    league: string | null;
+    contractMonths: number | null;
+    wage: number | null;
+    ea: EaValueBand | null;
+  }[];
   /** The transfer shortlist exactly as the game saved it (career blob `mssm`). */
   shortlistIngame: {
     readable: boolean;
@@ -434,6 +467,8 @@ export interface ScoutView {
   nationality: string | null;
   knowledge: number | null;
   experience: number | null;
+  /** True while the scout is away on a trip that has not returned yet. */
+  away: boolean;
   mission: {
     positions: string[];
     nation: string | null;
@@ -1281,6 +1316,11 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       // game shows. Displaying the raw value undersold every scout by one star.
       knowledge: num(sc, 'knowledge') === null ? null : Math.min(5, num(sc, 'knowledge')! + 1),
       experience: num(sc, 'experience') === null ? null : Math.min(5, num(sc, 'experience')! + 1),
+      away:
+        mission !== undefined &&
+        num(mission, 'returningdate') !== null &&
+        gameDate.date !== null &&
+        num(mission, 'returningdate')! > gameDate.date,
       mission: mission
         ? {
             positions,
@@ -1469,6 +1509,8 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
         teamId,
         name: teamNames.get(teamId) ?? `team ${teamId}`,
         position: num(l, 'currenttableposition'),
+        /** Where they finished last season — the movement arrow's other end. */
+        prevPosition: num(l, 'previousyeartableposition'),
         played,
         wins,
         draws,
@@ -1715,31 +1757,17 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     }),
   };
 
-  // --- scout-report prospects: written to disk before you sign them -----------
-  // A youthplayers row whose player sits in the free-agent pool with no
-  // contract is a report entry, not a squad member (verified 2026-08-29: the
-  // fresh tier-3 report lived at "NG - FA" while the signed prospects carried
-  // youth-team links, and a stale row pointed at a player long since poached).
-  const faLeagues = new Set<number>();
-  for (const l of rowsOf(tables, 'leagues')) {
-    const nm = l['leaguename'];
-    if (typeof nm === 'string' && /free agents/i.test(nm)) {
-      const id = num(l, 'leagueid');
-      if (id !== null) faLeagues.add(id);
-    }
-  }
-  const faTeams = new Set<number>();
-  for (const l of rowsOf(tables, 'leagueteamlinks')) {
-    const lg = num(l, 'leagueid');
-    const tid = num(l, 'teamid');
-    if (lg !== null && tid !== null && faLeagues.has(lg)) faTeams.add(tid);
-  }
-  const linkedAnywhere = new Set<number>();
-  for (const l of rowsOf(tables, 'teamplayerlinks')) {
-    const pid = num(l, 'playerid');
-    const tid = num(l, 'teamid');
-    if (pid !== null && tid !== null && !faTeams.has(tid)) linkedAnywhere.add(pid);
-  }
+  // --- scout-report prospects: delivered, not yet signed -----------------------
+  // `career_youthplayers` is a WORLD table: it carries youth rows for players
+  // at other clubs and in the free-agent pool too, so "has a youth row and no
+  // contract" catches strangers (2026-08-29: it surfaced a Belgian free agent
+  // while all three scouts were away on Jamaica/Bulgaria/Brazil trips — a
+  // false positive the user caught immediately).
+  //
+  // The signal that actually holds: the report lands the prospect in YOUR
+  // academy squad, and signing him is what writes the contract. So an unsigned
+  // report is a youth-team link with no contract row. Every one of the 13
+  // signed prospects in the dev save has a contract; a pending report has none.
   const academyPotentials = academy.map((p2) => p2.potential ?? 0).sort((a, b) => a - b);
   const academyMedianPot = academyPotentials.length
     ? academyPotentials[Math.floor(academyPotentials.length / 2)]!
@@ -1748,7 +1776,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   const academyReports = rowsOf(tables, 'career_youthplayers')
     .filter((y) => {
       const pid = num(y, 'playerid');
-      return pid !== null && !linkedAnywhere.has(pid) && !contracts.has(pid) && players.has(pid);
+      return pid !== null && academyIds.includes(pid) && !contracts.has(pid) && players.has(pid);
     })
     .map((y) => {
       const pid = num(y, 'playerid')!;
@@ -1790,6 +1818,67 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       };
     })
     .sort((a, b) => (b.potential ?? 0) - (a.potential ?? 0));
+
+  // --- scout profiles for the shopping list and the game's own shortlist -----
+  const profileIds = new Set<number>([
+    ...transfers.targets.map((t2) => t2.playerId),
+    ...(input.shortlist?.ids ?? []),
+  ]);
+  const scoutProfiles = [...profileIds]
+    .map((pid) => {
+      const row = players.get(pid);
+      if (!row) return null;
+      const teamId =
+        rowsOf(tables, 'teamplayerlinks')
+          .filter((l) => num(l, 'playerid') === pid)
+          .map((l) => num(l, 'teamid'))
+          .find((tid): tid is number => tid !== null && leagueIdOfTeam.has(tid)) ??
+        clubOf.get(pid) ??
+        null;
+      const age = ageAt(num(row, 'birthdate'), gameDate.date);
+      return {
+        playerId: pid,
+        name: nameOf(pid),
+        nation: nationName(num(row, 'nationality')),
+        age,
+        positionShort: positionShort(num(row, 'preferredposition1')),
+        preferredPositions: [1, 2, 3, 4]
+          .map((n) => num(row, `preferredposition${n}`))
+          .filter((v): v is number => v !== null && v >= 0)
+          .map((c) => positionShort(c) ?? positionName(c)),
+        overall: num(row, 'overallrating'),
+        potential: num(row, 'potential'),
+        foot: (num(row, 'preferredfoot') === 2 ? 'Left' : 'Right') as 'Left' | 'Right',
+        height: num(row, 'height'),
+        weight: num(row, 'weight'),
+        skillMoves: num(row, 'skillmoves'),
+        weakFoot: num(row, 'weakfootabilitytypecode'),
+        groups: groupsFor(row).map((group) => {
+          const attributes: AttributeValue[] = group.members.map((key) => ({
+            name: key,
+            value: num(row, key),
+            seasonDelta: null,
+          }));
+          const present = attributes.filter((a) => a.value !== null);
+          return {
+            name: group.name,
+            attributes,
+            mean: present.length
+              ? Math.round((present.reduce((sum, a) => sum + a.value!, 0) / present.length) * 10) / 10
+              : null,
+            seasonDelta: null,
+          };
+        }),
+        playStyles: readPlayStyles(row),
+        standout: standoutAttributes(worldStats, slotOf(num(row, 'preferredposition1')), row),
+        teamName: teamNames.get(teamId ?? -1) ?? null,
+        league: teamId !== null ? (leagueOfTeam.get(teamId) ?? null) : null,
+        contractMonths: contractMonths(num(row, 'contractvaliduntil'), gameDate.date),
+        wage: num(contracts.get(pid), 'wage'),
+        ea: eaValue(num(row, 'overallrating'), age, num(row, 'potential'), num(row, 'preferredposition1')),
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
 
   const regens = buildRegenReport({
     players,
@@ -1885,6 +1974,9 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     generatedAt: new Date().toISOString(),
     club: { id: clubId, name: (club?.['teamname'] as string) ?? null, overall: num(club, 'overallrating') },
     manager: [user?.['firstname'], user?.['surname']].filter(Boolean).join(' ') || null,
+    // 0 dollar, 1 euro, 2 pound — the standard FC enum, and the dev save's 2
+    // matches an English club's pounds in game.
+    currency: { 0: '$', 1: '€', 2: '£' }[num(pref, 'currency') ?? 2] ?? '£',
     season: num(user, 'seasoncount'),
     gameDate: gameDate.date,
     gameDateBasis: gameDate.basis,
@@ -1927,6 +2019,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     sellValues,
     shortlistIngame,
     academyReports,
+    scoutProfiles,
     warnings,
   };
 }

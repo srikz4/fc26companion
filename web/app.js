@@ -109,6 +109,7 @@ const state = {
     }
   })(),
   hubMode: 'basic',
+  rosterSel: null,
   open: new Set(),
   attrs: new Set(),
   lastSync: null,
@@ -125,19 +126,21 @@ function el(tag, cls, text) {
 
 const fmtDate = (n) =>
   n === null || n === undefined ? 'unknown' : String(n).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
-const money = (n) => (n === null || n === undefined ? null : n.toLocaleString('en-GB'));
+/** The career's own currency, read from the save; pounds until a doc says otherwise. */
+const cur = () => window.__doc?.currency ?? '£';
+const money = (n) => (n === null || n === undefined ? null : `${cur()}${n.toLocaleString('en-GB')}`);
 const moneyShort = (n) =>
   n === null || n === undefined
     ? '—'
     : settings.fullMoney && n !== 0
-      ? n.toLocaleString('en-GB')
+      ? `${cur()}${n.toLocaleString('en-GB')}`
     : n === 0
-      ? '0M'
+      ? `${cur()}0`
       : n >= 1_000_000
-      ? `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`
+      ? `${cur()}${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`
       : n >= 1_000
-        ? `${Math.round(n / 1_000)}K`
-        : String(n);
+        ? `${cur()}${Math.round(n / 1_000)}K`
+        : `${cur()}${n}`;
 
 /**
  * Rating tiers, shared by overall, potential and attributes so one glance means
@@ -225,6 +228,28 @@ function flagFor(name) {
   const iso = ISO2[name];
   if (!iso || iso === 'XK') return '';
   return [...iso].map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join('') + ' ';
+}
+
+/**
+ * Stars, with a real half — a literal "½" reads as a typo next to ★★★★.
+ * The half is a ★ clipped to its left half by an inline-block wrapper.
+ */
+function starsOf(value, max = 5) {
+  const box = el('span', 'starline');
+  if (value === null || value === undefined) {
+    box.append('—');
+    return box;
+  }
+  const full = Math.floor(value);
+  const half = value - full >= 0.25 && value - full < 0.75;
+  const capped = Math.min(max, full);
+  if (capped > 0) box.append('★'.repeat(capped));
+  if (half && capped < max) {
+    const h = el('span', 'halfstar');
+    h.appendChild(el('span', null, '★'));
+    box.appendChild(h);
+  }
+  return box;
 }
 
 function starBadge(label, stars) {
@@ -338,7 +363,8 @@ const NO_HOVER = window.matchMedia?.('(hover: none)').matches ?? false;
 function activatable(node, onActivate, opts = {}) {
   node.addEventListener('click', onActivate);
   if (NO_HOVER) {
-    if (!node.querySelector('.dwell-fill')) node.appendChild(el('span', 'dwell-fill'));
+    const host0 = opts.host ?? node;
+    if (!host0.querySelector('.dwell-fill')) host0.appendChild(el('span', 'dwell-fill'));
     return node;
   }
 
@@ -349,8 +375,12 @@ function activatable(node, onActivate, opts = {}) {
     timer = null;
   };
 
+  // `host` is where the dwell furniture lives. It defaults to the node, but a
+  // table row must put it inside a real <td>: a bare <span> child of <tr> gets
+  // wrapped in an anonymous cell, which shifts every column off its header.
+  const host = opts.host ?? node;
   const pad = opts.pad ? el('span', 'dwellpad') : null;
-  if (pad) node.prepend(pad);
+  if (pad) host.prepend(pad);
   const armTarget = pad ?? node;
 
   armTarget.addEventListener('pointerenter', () => {
@@ -365,7 +395,7 @@ function activatable(node, onActivate, opts = {}) {
   armTarget.addEventListener('pointerleave', stop);
   node.addEventListener('pointerdown', stop);
 
-  if (!node.querySelector('.dwell-fill')) node.appendChild(el('span', 'dwell-fill'));
+  if (!host.querySelector('.dwell-fill')) host.appendChild(el('span', 'dwell-fill'));
   return node;
 }
 
@@ -556,6 +586,7 @@ const SORTS = {
   overall: { label: 'Overall', fn: (a, b) => (b.overall ?? 0) - (a.overall ?? 0) },
   potential: { label: 'Potential', fn: (a, b) => (b.potential ?? 0) - (a.potential ?? 0) },
   headroom: { label: 'Growth left', fn: (a, b) => (b.headroom ?? 0) - (a.headroom ?? 0) },
+  potential: { label: 'Ceiling', fn: (a, b) => (b.potential ?? 0) - (a.potential ?? 0) },
   age: { label: 'Age', fn: (a, b) => (a.age ?? 99) - (b.age ?? 99) },
   growth: { label: 'Season change', fn: (a, b) => (b.overallSeasonDelta ?? -99) - (a.overallSeasonDelta ?? -99) },
   minutes: { label: 'Minutes', fn: (a, b) => (b.minutesThisSeason ?? 0) - (a.minutesThisSeason ?? 0) },
@@ -573,19 +604,10 @@ const SORTS = {
  * word — the arrow from overall to ceiling says it, and the tooltip spells it
  * out in English.
  */
-function playerCard(p, onClose, mode = 'basic') {
-  const card = el('div', `card ${p.advice.severity}`);
-  if (state.open.has(p.playerId) || mode === 'attributes') card.classList.add('open');
+/* ---------------- player card ---------------- */
 
-  // --- what to do about him
-  const notable = [p.advice, ...p.otherAdvice].filter((a) => a.severity !== 'steady');
-  if (notable.length) {
-    const acts = el('div', 'acts');
-    for (const a of notable) acts.appendChild(el('span', `act ${a.severity}`, a.tag));
-    card.appendChild(acts);
-  }
-
-  // --- who he is
+/** Identity block, shared by every face of the card. */
+function cardHead(p, onClose) {
   const head = el('div', 'head');
   if (onClose) {
     const closer = el('button', 'chip closer', 'Close ✕');
@@ -599,7 +621,7 @@ function playerCard(p, onClose, mode = 'basic') {
   name.append(p.name);
   if (p.nameProvisional) {
     const mark = el('span', 'prov', ' ~');
-    mark.title = 'Derived name — measured 98.7% accurate, never drives advice';
+    mark.dataset.tip = 'Derived name — measured 98.7% accurate, never drives advice';
     name.appendChild(mark);
   }
   head.appendChild(name);
@@ -607,29 +629,29 @@ function playerCard(p, onClose, mode = 'basic') {
 
   const rates = el('div', 'rates');
   const ovr = el('span', 'rate');
+  ovr.appendChild(el('span', 'lbl', 'OVR'));
   ovr.appendChild(el('span', `n ${tier(p.overall)}`, p.overall ?? '—'));
-  if (p.potential !== null && p.potential !== p.overall) {
-    ovr.appendChild(el('span', 'arrow', '→'));
-    ovr.appendChild(el('span', `n ceil ${tier(p.potential)}`, p.potential));
-  }
-  ovr.title =
-    p.potential === null || p.overall === null
-      ? 'overall'
-      : `Rated ${p.overall} today; the game says ${p.potential} is reachable` +
-        (p.potential > p.overall ? ` — ${p.potential - p.overall} still to grow.` : '. Already there.');
   rates.appendChild(ovr);
-
+  const pot = el('span', 'rate');
+  pot.appendChild(el('span', 'lbl', 'POT'));
+  pot.appendChild(el('span', `n ceil ${tier(p.potential)}`, p.potential ?? '—'));
+  if (p.potential !== null && p.overall !== null && p.potential > p.overall) {
+    pot.dataset.tip = `${p.potential - p.overall} still to grow`;
+  }
+  rates.appendChild(pot);
   if (p.fits[0] && p.bestSlot) {
     const fit = el('span', 'rate');
     fit.appendChild(el('span', 'lbl', p.fits[0].slot));
     fit.appendChild(el('span', `n ${tier(p.fits[0].value)}`, p.fits[0].value));
-    fit.title = `The rating playing ${slotLabel(p.bestSlot).toLowerCase()} — our figure, not the game's.`;
+    fit.dataset.tip = `The rating playing ${slotLabel(p.bestSlot).toLowerCase()} — our figure, not the game's.`;
     rates.appendChild(fit);
   }
   head.appendChild(rates);
-  card.appendChild(head);
+  return head;
+}
 
-  // --- one quiet line of facts
+/** The one-line biography under the head. */
+function cardFacts(p) {
   const facts = el('div', 'facts');
   if (p.nation) facts.appendChild(el('span', null, `${flagFor(p.nation)}${p.nation}`));
   for (const bit of [
@@ -646,200 +668,62 @@ function playerCard(p, onClose, mode = 'basic') {
   const wf = starBadge('WF', p.weakFoot);
   if (sm) facts.appendChild(sm);
   if (wf) facts.appendChild(wf);
-  card.appendChild(facts);
+  return facts;
+}
 
-  // --- only the flags that change a decision
-  const flags = el('div', 'flags');
-  if (p.potentialTag) flags.appendChild(el('span', 'flag gold', p.potentialTag));
-  const g = delta(p.overallSeasonDelta);
-  if (g && g.text !== '0') flags.appendChild(el('span', `flag ${g.cls}`, `${g.text} this season`));
-  const cd = delta(p.potentialSeasonDelta);
-  if (cd && cd.text !== '0') {
-    const f2 = el('span', `flag ceilflag ${cd.cls}`, `ceiling ${cd.text}`);
-    f2.title = 'Potential change observed across this career\u2019s snapshots since the season began.';
-    flags.appendChild(f2);
-  }
-  if (p.injured) flags.appendChild(el('span', 'flag down', 'Injured'));
-  if (p.retiring) flags.appendChild(el('span', 'flag down', 'Retiring'));
-  if (p.onLoan) flags.appendChild(el('span', 'flag', 'On loan'));
-  if (p.transferBlocked) flags.appendChild(el('span', 'flag', 'Transfer blocked'));
-  if (p.youth && p.youth.monthsInSquad === 0) flags.appendChild(el('span', 'flag up', 'New intake'));
-  if (p.generation && p.generation.potential !== null && p.generation.potential >= 97 && (p.age ?? 99) <= 21) {
-    const gen = el('span', 'flag gold', `Top ${Math.max(1, 100 - p.generation.potential)}% of their generation`);
-    gen.title = `A ceiling in the ${p.generation.potential}th percentile of the ${p.generation.peers.toLocaleString('en-GB')} players this age in this world.`;
-    flags.appendChild(gen);
-  } else if (p.generation && p.generation.overall >= 97 && (p.age ?? 99) <= 21) {
-    const gen = el('span', 'flag gold', `Top ${Math.max(1, 100 - p.generation.overall)}% for their age`);
-    gen.title = `An overall in the ${p.generation.overall}th percentile of the ${p.generation.peers.toLocaleString('en-GB')} players this age in this world.`;
-    flags.appendChild(gen);
-  }
-  if (flags.childElementCount) card.appendChild(flags);
-
-  if (settings.developFocus && p.developFocus?.length) {
-    const dev = el('div', 'devfocus');
-    dev.appendChild(el('span', 'lbl', 'DEVELOP'));
-    for (const d of p.developFocus) {
-      const chip = el('span', 'chipish', `${prettyAttr(d.attr)} ${d.value}`);
-      chip.dataset.tip = `${d.percentile}th percentile among ${p.positionShort ?? 'position'}s in this world, and heavily weighted in the ${p.positionShort ?? ''} fit model — growth here buys the most. Point an in-game development plan at it.`;
-      dev.appendChild(chip);
-    }
-    card.appendChild(dev);
-  }
-
-  // The player's signature: attributes in the top of the position's world
-  // population. "78-rated winger" hides that his pace is elite; this does not.
-  if (p.standout.length) {
-    const line = el('div', 'standout');
-    line.appendChild(el('span', 'lbl', 'Standout'));
-    for (const st of p.standout) {
-      const chip = el('span', 'so', `${prettyAttr(st.attr)} ${st.value}`);
-      chip.title = `${st.percentile}th percentile among ${p.positionShort ?? 'position peers'}s in this world`;
-      line.appendChild(chip);
-    }
-    card.appendChild(line);
-  }
-
-  // --- what he is made of
-  const groups = el('div', 'groups');
-  for (const group of p.groups) {
-    const tile = el('div', 'gtile');
-    tile.appendChild(el('div', 'gname', group.name));
-    const row = el('div', 'grow');
-    row.appendChild(el('span', `gval ${tier(group.mean)}`, group.mean ?? '—'));
-    const d = delta(group.seasonDelta);
-    if (d && d.text !== '0') row.appendChild(el('span', `gdelta ${d.cls}`, d.text));
-    tile.appendChild(row);
-
-    // A one-attribute group (every goalkeeper group) would just print its own
-    // number again underneath itself — except on the Attributes view, where
-    // the full sheet is the point.
-    const attrs = el('div', 'attrs');
-    if (group.attributes.length > 1 || mode === 'attributes') for (const a of group.attributes) {
-      const line = el('div', 'attr');
-      line.appendChild(el('span', 'an', prettyAttr(a.name)));
-      line.appendChild(el('span', `av ${tier(a.value)}`, a.value ?? '—'));
-      const ad = delta(a.seasonDelta);
-      const shown = ad && ad.text !== '0';
-      line.appendChild(el('span', `ad ${shown ? ad.cls : ''}`, shown ? ad.text : ''));
-      attrs.appendChild(line);
-    }
-    tile.appendChild(attrs);
-    groups.appendChild(tile);
-  }
-  card.appendChild(groups);
-
-  if (p.playStyles.length) {
-    const styles = el('div', 'styles');
-    for (const st of p.playStyles) {
-      const node = el('span', st.plus ? 'style plus' : 'style', st.name + (st.plus ? '+' : ''));
-      node.title = `${st.category} PlayStyle`;
-      styles.appendChild(node);
-    }
-    card.appendChild(styles);
-  }
-
-  // --- the season in numbers: labelled blocks, not a run-on sentence
-  const strip = el('div', 'strip');
-  const add = (label, value, title) => {
-    if (value === null || value === undefined || value === '') return;
-    const cell = el('span', 'stat');
-    if (title) cell.dataset.tip = title;
+/** Labelled stat tiles — the card's unit of measurement. */
+function tileRow(items) {
+  const strip = el('div', 'tiles');
+  for (const [label, value, tip, cls] of items) {
+    if (value === null || value === undefined || value === '') continue;
+    const cell = el('span', `tile${cls ? ` ${cls}` : ''}`);
+    if (tip) cell.dataset.tip = tip;
     cell.appendChild(el('i', null, label));
     cell.appendChild(el('b', null, String(value)));
     strip.appendChild(cell);
-  };
-  add('Minutes', p.minutesThisSeason);
-  add('Apps', p.appearances);
-  add('Goals', p.goals || null);
-  add(
-    'Rating',
-    p.averageRating === null
-      ? null
-      : p.ratingSpread === null
-        ? p.averageRating
-        : `${p.averageRating} ±${p.ratingSpread}`,
-    p.ratingSpread === null
-      ? undefined
-      : `Average match rating ± its spread over ${p.appearances} games — a low spread means they show up every week.`,
-  );
-  add('Wage', money(p.wage), p.wageNote ?? undefined);
-  add('Deal', p.contractMonths === null ? null : fmtTerm(p.contractMonths));
-  add('Role', p.squadRole === 'None' ? null : p.squadRole);
-  if (p.youth) add('In academy', p.youth.monthsInSquad === null ? null : fmtTerm(p.youth.monthsInSquad));
-  if (p.synergy.length) {
-    add(
-      'Synergy links',
-      p.synergy.length,
-      `Patterns connecting this player with squad mates, strongest first:\n` +
-        p.synergy.slice(0, 5).map((l) => l.evidence).join('\n'),
-    );
   }
-  if (strip.childElementCount) card.appendChild(strip);
+  return strip;
+}
 
-  const spark = sparkline(p.overallSeries);
-  if (spark) {
-    const box = el('div', 'sparkbox');
-    box.appendChild(el('span', 'lbl', 'OVERALL, THIS CAREER'));
-    box.appendChild(spark);
-    card.appendChild(box);
+/** A labelled section inside the card. */
+function cardSection(label, node, cls) {
+  const box = el('div', `csec${cls ? ` ${cls}` : ''}`);
+  if (label) box.appendChild(el('span', 'lbl', label));
+  if (node) box.appendChild(node);
+  return box;
+}
+
+/**
+ * One player, dressed for the view that opened him.
+ *
+ *   basic       who he is, what to do about him, the shape of his game
+ *   stats       the season, match by match
+ *   attributes  the full sheet, every attribute with its bar
+ *   financial   wage, contract, value and the renewal on the table
+ *
+ * Each face carries what its view is for and nothing else — the same block
+ * repeated four times was the complaint, and it was fair.
+ */
+function playerCard(p, onClose, mode = 'basic') {
+  const card = el('div', `card ${p.advice.severity} mode-${mode}`);
+  const notable = [p.advice, ...p.otherAdvice].filter((a) => a.severity !== 'steady');
+
+  if (notable.length && mode === 'basic') {
+    const acts = el('div', 'acts');
+    for (const a of notable) acts.appendChild(el('span', `act ${a.severity}`, a.tag));
+    card.appendChild(acts);
   }
+  card.appendChild(cardHead(p, onClose));
+  card.appendChild(cardFacts(p));
 
-  // The Stats view of the card: his season, match by match.
-  if (mode === 'stats' && p.recentRatings?.length) {
-    const rec = el('div', 'notes');
-    rec.appendChild(el('span', 'lbl', 'RECENT MATCHES'));
-    rec.appendChild(
-      table(
-        ['Date', 'Position', { label: 'Min', num: true }, { label: 'Rating', num: true }],
-        p.recentRatings.slice(-8).reverse().map((m) => [
-          fmtDate(m.date),
-          m.position,
-          { text: m.minutes, num: true },
-          { text: m.rating, num: true, tier: m.rating >= 8 ? 90 : m.rating >= 7 ? 82 : 70 },
-        ]),
-        { tight: true },
-      ),
-    );
-    card.appendChild(rec);
-  }
+  if (mode === 'basic') basicFace(card, p);
+  else if (mode === 'stats') statsFace(card, p);
+  else if (mode === 'attributes') attributesFace(card, p);
+  else if (mode === 'financial') financialFace(card, p);
 
-  // The Financial view of the card: everything money knows about him.
-  if (mode === 'financial') {
-    const doc2 = state.doc;
-    const sv = doc2?.sellValues?.rows?.find((r) => r.playerId === p.playerId);
-    const ren = doc2?.wages?.renewals?.find((r) => r.playerId === p.playerId);
-    const fin = el('div', 'notes');
-    fin.appendChild(el('span', 'lbl', 'MONEY'));
-    const line = (k, v, tip) => {
-      const row = el('div', 'note steady');
-      row.appendChild(el('b', null, k));
-      const sp = el('span', null, v);
-      if (tip) sp.dataset.tip = tip;
-      row.appendChild(sp);
-      fin.appendChild(row);
-    };
-    if (sv?.ea) line('EA value ~', `${moneyShort(sv.ea.value)} · floor ${moneyShort(sv.ea.floor)} · ceiling ${moneyShort(sv.ea.ceiling)}`, 'EA-style valuation from community-derived curves — a guide, never a rule input.');
-    if (sv?.mid != null) line('World pays', `${moneyShort(sv.low)}–${moneyShort(sv.high)}`, `Fitted on the deals this world has actually agreed.`);
-    if (p.wageNote) line('Wage check', p.wageNote);
-    if (ren) line('Renewal', `${ren.options[0].years}y flat at ${money(ren.options[0].weeklyWage)}/wk — the game takes at most ${ren.maxYears}y at this age`, 'Both packages, with bonuses and the clause call, under Squad › Wages.');
-    card.appendChild(fin);
-  }
-
-  const actions = el('div', 'rowacts');
-  const toggle = el('button', 'ghost', state.open.has(p.playerId) ? 'Hide attributes' : 'Attributes');
-  activatable(toggle, () => {
-    if (state.open.has(p.playerId)) state.open.delete(p.playerId);
-    else state.open.add(p.playerId);
-    card.classList.toggle('open');
-    toggle.firstChild.textContent = card.classList.contains('open') ? 'Hide attributes' : 'Attributes';
-  });
-  actions.appendChild(toggle);
-
-  card.appendChild(actions);
-
-  // The reasoning is part of the card, not something to ask for: every call
-  // the rules made, with the numbers that made it.
-  if (notable.length) {
+  // The reasoning belongs with the calls, so it rides on the face that shows
+  // them — not on the money page or the attribute sheet.
+  if (notable.length && mode === 'basic') {
     const panel = el('div', 'notes');
     panel.appendChild(el('span', 'lbl', 'WHY THESE CALLS'));
     for (const a of notable) {
@@ -851,8 +735,266 @@ function playerCard(p, onClose, mode = 'basic') {
     }
     card.appendChild(panel);
   }
-
   return card;
+}
+
+/** basic: who he is and what to do about him. */
+function basicFace(card, p) {
+  const flags = el('div', 'flags');
+  if (p.potentialTag) flags.appendChild(el('span', 'flag gold', p.potentialTag));
+  const g = delta(p.overallSeasonDelta);
+  if (g && g.text !== '0') flags.appendChild(el('span', `flag ${g.cls}`, `${g.text} this season`));
+  const cd = delta(p.potentialSeasonDelta);
+  if (cd && cd.text !== '0') {
+    const f2 = el('span', `flag ceilflag ${cd.cls}`, `ceiling ${cd.text}`);
+    f2.dataset.tip = 'Potential change observed across this career\u2019s snapshots since the season began.';
+    flags.appendChild(f2);
+  }
+  if (p.injured) flags.appendChild(el('span', 'flag down', 'Injured'));
+  if (p.retiring) flags.appendChild(el('span', 'flag down', 'Retiring'));
+  if (p.onLoan) flags.appendChild(el('span', 'flag', 'On loan'));
+  if (p.transferBlocked) flags.appendChild(el('span', 'flag', 'Transfer blocked'));
+  if (p.youth && p.youth.monthsInSquad === 0) flags.appendChild(el('span', 'flag up', 'New intake'));
+  if (p.generation && p.generation.potential !== null && p.generation.potential >= 97 && (p.age ?? 99) <= 21) {
+    const gen = el('span', 'flag gold', `Top ${Math.max(1, 100 - p.generation.potential)}% of their generation`);
+    gen.dataset.tip = `A ceiling in the ${p.generation.potential}th percentile of the ${p.generation.peers.toLocaleString('en-GB')} players this age in this world.`;
+    flags.appendChild(gen);
+  }
+  if (flags.childElementCount) card.appendChild(flags);
+
+  // The shape of his game: group means as bars, so strengths read instantly.
+  if (p.groups.length) {
+    const bars = el('div', 'gbars');
+    const best = Math.max(...p.groups.map((x) => x.mean ?? 0), 1);
+    for (const group of p.groups) {
+      const row = el('div', 'gbar');
+      row.appendChild(el('span', 'gbname', group.name));
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill ${tier(group.mean)}`);
+      fill.style.width = `${Math.max(4, Math.round(((group.mean ?? 0) / Math.max(best, 99)) * 100))}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      const v = el('span', 'gbval');
+      v.appendChild(el('b', null, group.mean ?? '—'));
+      const d = delta(group.seasonDelta);
+      if (d && d.text !== '0') v.appendChild(el('span', `gdelta ${d.cls}`, d.text));
+      row.appendChild(v);
+      bars.appendChild(row);
+    }
+    card.appendChild(cardSection('THE SHAPE OF HIS GAME', bars));
+  }
+
+  if (p.standout.length) {
+    const line = el('div', 'chipwrap');
+    for (const st of p.standout) {
+      const chip = el('span', 'so', `${prettyAttr(st.attr)} ${st.value}`);
+      chip.dataset.tip = `${st.percentile}th percentile among ${p.positionShort ?? 'position peers'} in this world`;
+      line.appendChild(chip);
+    }
+    card.appendChild(cardSection('STANDOUT', line));
+  }
+
+  if (settings.developFocus && p.developFocus?.length) {
+    const dev = el('div', 'chipwrap');
+    for (const d of p.developFocus) {
+      const chip = el('span', 'chipish', `${prettyAttr(d.attr)} ${d.value}`);
+      chip.dataset.tip = `${d.percentile}th percentile for his position and heavily weighted in the fit model — growth here buys the most. Point an in-game development plan at it.`;
+      dev.appendChild(chip);
+    }
+    card.appendChild(cardSection('WHERE GROWTH PAYS', dev));
+  }
+
+  if (p.playStyles.length) {
+    const styles = el('div', 'chipwrap');
+    for (const st of p.playStyles) {
+      const node = el('span', st.plus ? 'style plus' : 'style', st.name + (st.plus ? '+' : ''));
+      node.dataset.tip = `${st.category} PlayStyle`;
+      styles.appendChild(node);
+    }
+    card.appendChild(cardSection('PLAYSTYLES', styles));
+  }
+
+  card.appendChild(
+    tileRow([
+      ['Minutes', p.minutesThisSeason],
+      ['Apps', p.appearances],
+      ['Goals', p.goals || null],
+      ['Rating', p.averageRating],
+      ['Deal', p.contractMonths === null ? null : fmtTerm(p.contractMonths)],
+      ['Role', p.squadRole === 'None' ? null : p.squadRole],
+    ]),
+  );
+
+  const spark = sparkline(p.overallSeries);
+  if (spark) card.appendChild(cardSection('OVERALL, THIS CAREER', spark, 'sparkbox'));
+}
+
+/** stats: the season, and every match in it. */
+function statsFace(card, p) {
+  const apps = p.appearances ?? 0;
+  const mins = p.minutesThisSeason ?? 0;
+  const per90 = (v) => (mins >= 90 && v !== null && v !== undefined ? Math.round((v / mins) * 90 * 100) / 100 : null);
+  card.appendChild(
+    tileRow([
+      ['Apps', apps],
+      ['Minutes', mins || null],
+      ['Goals', p.goals ?? 0],
+      ['Goals / 90', per90(p.goals)],
+      ['Avg rating', p.averageRating, apps ? `Across ${apps} rated appearances` : undefined],
+      ['Consistency', p.ratingSpread === null ? null : `±${p.ratingSpread}`, 'Spread of his match ratings — a low number means he shows up every week.'],
+      ['Mins / app', apps ? Math.round(mins / apps) : null],
+      ['Form', p.form],
+      ['Morale', p.morale],
+    ]),
+  );
+
+  if (p.recentRatings?.length) {
+    const best = Math.max(...p.recentRatings.map((m) => m.rating));
+    const bars = el('div', 'gbars');
+    for (const m of p.recentRatings.slice(-10).reverse()) {
+      const row = el('div', 'gbar');
+      row.appendChild(el('span', 'gbname', fmtDate(m.date)));
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill ${m.rating >= 8 ? 't4' : m.rating >= 7 ? 't3' : m.rating >= 6 ? 't2' : 't1'}`);
+      fill.style.width = `${Math.max(6, Math.round((m.rating / Math.max(best, 10)) * 100))}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      const v = el('span', 'gbval');
+      v.appendChild(el('b', null, m.rating.toFixed(1)));
+      v.appendChild(el('span', 'gdelta', `${m.minutes}'`));
+      row.appendChild(v);
+      row.dataset.tip = `${m.position} · ${m.minutes} minutes · rated ${m.rating}`;
+      bars.appendChild(row);
+    }
+    card.appendChild(cardSection('MATCH BY MATCH', bars));
+  } else {
+    card.appendChild(cardSection('MATCH BY MATCH', el('p', 'muted tiny', 'No rated appearances recorded this season.')));
+  }
+
+  const spark = sparkline(p.overallSeries);
+  if (spark) card.appendChild(cardSection('OVERALL, THIS CAREER', spark, 'sparkbox'));
+}
+
+/** attributes: the full sheet, nothing else. */
+function attributesFace(card, p) {
+  const wrap = el('div', 'attrsheet');
+  for (const group of p.groups) {
+    const col = el('div', 'asheet-group');
+    const head = el('div', 'asheet-head');
+    head.appendChild(el('span', 'gname', group.name));
+    const mean = el('span', 'gval-wrap');
+    mean.appendChild(el('b', `gval ${tier(group.mean)}`, group.mean ?? '—'));
+    const gd = delta(group.seasonDelta);
+    if (gd && gd.text !== '0') mean.appendChild(el('span', `gdelta ${gd.cls}`, gd.text));
+    head.appendChild(mean);
+    col.appendChild(head);
+    for (const a of group.attributes) {
+      const row = el('div', 'asheet-row');
+      row.appendChild(el('span', 'an', prettyAttr(a.name)));
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill ${tier(a.value)}`);
+      fill.style.width = `${Math.max(3, Math.round(((a.value ?? 0) / 99) * 100))}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      row.appendChild(el('span', `av ${tier(a.value)}`, a.value ?? '—'));
+      const ad = delta(a.seasonDelta);
+      row.appendChild(el('span', `ad ${ad && ad.text !== '0' ? ad.cls : ''}`, ad && ad.text !== '0' ? ad.text : ''));
+      col.appendChild(row);
+    }
+    wrap.appendChild(col);
+  }
+  card.appendChild(wrap);
+
+  if (p.standout.length || p.developFocus?.length) {
+    const line = el('div', 'chipwrap');
+    for (const st of p.standout) {
+      const chip = el('span', 'so', `${prettyAttr(st.attr)} ${st.value}`);
+      chip.dataset.tip = `${st.percentile}th percentile among ${p.positionShort ?? 'peers'} in this world`;
+      line.appendChild(chip);
+    }
+    for (const d of p.developFocus ?? []) {
+      const chip = el('span', 'chipish', `↑ ${prettyAttr(d.attr)} ${d.value}`);
+      chip.dataset.tip = `${d.percentile}th percentile and heavily weighted for his position — growth here buys the most.`;
+      line.appendChild(chip);
+    }
+    card.appendChild(cardSection('ELITE, AND WHERE GROWTH PAYS', line));
+  }
+}
+
+/** financial: wage, contract, value, and the deal on the table. */
+function financialFace(card, p) {
+  const doc = state.doc;
+  const sv = doc?.sellValues?.rows?.find((r) => r.playerId === p.playerId);
+  const ren = doc?.wages?.renewals?.find((r) => r.playerId === p.playerId);
+  const assess = doc?.wages?.assessmentList?.find((a) => a.playerId === p.playerId);
+
+  card.appendChild(
+    tileRow([
+      ['Wage', money(p.wage), p.wageNote ?? undefined],
+      ['Contract', p.contractMonths === null ? null : fmtTerm(p.contractMonths)],
+      ['Role', p.squadRole === 'None' ? null : p.squadRole],
+      ['Share of bill', assess?.shareOfBill ? `${(assess.shareOfBill * 100).toFixed(1)}%` : null, 'This wage as a share of the whole squad bill.'],
+      ['Band median', money(assess?.peerMedian), 'Median wage of squad members in the same role band.'],
+      ['Verdict', p.wageVerdict, assess?.note],
+    ]),
+  );
+
+  if (sv?.ea) {
+    const band = el('div', 'valband');
+    const line = el('div', 'valbar');
+    line.appendChild(el('i', 'vfloor'));
+    line.appendChild(el('i', 'vmid'));
+    line.appendChild(el('i', 'vceil'));
+    band.appendChild(line);
+    const marks = el('div', 'valmarks');
+    for (const [lbl, v, cls] of [['Walk away', sv.ea.floor, 'lo'], ['Fair value', sv.ea.value, 'mid'], ['Push to', sv.ea.ceiling, 'hi']]) {
+      const m = el('span', `vmark ${cls}`);
+      m.appendChild(el('i', null, lbl));
+      m.appendChild(el('b', null, moneyShort(v)));
+      marks.appendChild(m);
+    }
+    band.appendChild(marks);
+    band.dataset.tip = 'EA-style valuation, rebuilt from community-derived curves. Derived (~), never a rule input.';
+    card.appendChild(cardSection('WHAT HE IS WORTH ~', band));
+    if (sv.mid !== null && sv.mid !== undefined) {
+      card.appendChild(
+        el('p', 'muted tiny', `This world has actually paid ${moneyShort(sv.low)}–${moneyShort(sv.high)} for players of this profile.`),
+      );
+    }
+  }
+
+  if (ren) {
+    const wrap = el('div', 'pkgrow');
+    for (const o of ren.options) {
+      const box = el('div', 'pkg');
+      const t = el('div', 'pkg-head');
+      t.appendChild(el('b', null, o.kind === 'flat' ? 'Flat deal' : 'Base plus bonus'));
+      t.appendChild(el('span', 'pkg-wage', `${money(o.weeklyWage)}/wk`));
+      box.appendChild(t);
+      const rows = [
+        ['Term', `${o.years} years`],
+        ['Signing bonus', money(o.signOnBonus)],
+        o.bonusPerEvent ? ['Appearance bonus', `${money(o.bonusPerEvent)} after ${o.bonusEvents}/season`] : null,
+        ['Guaranteed', money(o.guaranteedCost)],
+        o.maximumCost !== o.guaranteedCost ? ['If all bonuses hit', money(o.maximumCost)] : null,
+      ].filter(Boolean);
+      const dl = el('div', 'pkg-rows');
+      for (const [k, v] of rows) {
+        const line = el('div', 'pkg-row');
+        line.appendChild(el('span', null, k));
+        line.appendChild(el('b', null, v ?? '—'));
+        dl.appendChild(line);
+      }
+      box.appendChild(dl);
+      box.appendChild(el('p', 'pkg-trade', o.tradeoff));
+      wrap.appendChild(box);
+    }
+    card.appendChild(cardSection(`RENEWAL — THE GAME TAKES AT MOST ${ren.maxYears}Y AT THIS AGE`, wrap));
+    const clause = el('div', `clause ${ren.releaseClause.recommend ? 'yes' : 'no'}`);
+    clause.appendChild(el('b', null, ren.releaseClause.recommend ? `Release clause: ${money(ren.releaseClause.amount)}` : 'No release clause'));
+    clause.appendChild(el('span', null, ren.releaseClause.why));
+    card.appendChild(clause);
+  }
 }
 
 /** `defensiveawareness` is not a word. */
@@ -885,10 +1027,31 @@ function table(headers, rows, opts = {}) {
   const wrap = el('div', 'table-wrap');
   const t = el('table');
   if (opts.tight) t.classList.add('tight');
+
+  // A column every row leaves blank is noise wearing a header — the academy's
+  // "Mins" column, for instance, where the save records no academy minutes at
+  // all. Drop it rather than print a wall of dashes. Interactive cells (stars)
+  // never count as blank.
+  const blankCell = (c) =>
+    c === null || c === undefined || c === '' || c === '—' ||
+    (typeof c === 'object' && !c.star && !c.node && (c.text === null || c.text === undefined || c.text === '' || c.text === '—'));
+  const keep = headers.map((h, i) =>
+    (typeof h === 'object' && h.always) || rows.length === 0 || !rows.every((r) => blankCell(r[i])),
+  );
+  headers = headers.filter((_, i) => keep[i]);
+  rows = rows.map((r) => r.filter((_, i) => keep[i]));
+
+  const rowsAreOpenable = !!(opts.keys && opts.onRow);
+  if (rowsAreOpenable) headers = [{ label: '', always: true, zone: true }, ...headers];
+
   const thead = el('thead');
   const hr = el('tr');
   headers.forEach((h, col) => {
     const isObj = typeof h === 'object';
+    if (isObj && h.zone) {
+      hr.appendChild(el('th', 'dwellzone'));
+      return;
+    }
     const th = el('th', `sortable${isObj && h.num ? ' num' : ''}`, isObj ? h.label : h);
     // Through activatable, not a bare click: sorting must dwell like every
     // other control in the app.
@@ -900,7 +1063,10 @@ function table(headers, rows, opts = {}) {
       th.classList.add('on');
       if (asc) th.classList.add('asc');
       const body = t.querySelector('tbody');
-      const sorted = [...body.children].sort((ra, rb) => {
+      // Detail rows travel with their parent, so sort only the real rows and
+      // re-attach each detail underneath the row it belongs to.
+      const dataRows = [...body.children].filter((r) => !r.classList.contains('detailrow'));
+      const sorted = dataRows.sort((ra, rb) => {
         const va = ra.children[col]?.dataset.sort ?? '';
         const vb = rb.children[col]?.dataset.sort ?? '';
         const na = Number(va);
@@ -911,7 +1077,11 @@ function table(headers, rows, opts = {}) {
             : String(va).localeCompare(String(vb));
         return asc ? cmp : -cmp;
       });
-      for (const r of sorted) body.appendChild(r);
+      for (const r of sorted) {
+        const detail = r.nextElementSibling?.classList.contains('detailrow') ? r.nextElementSibling : null;
+        body.appendChild(r);
+        if (detail) body.appendChild(detail);
+      }
     });
     hr.appendChild(th);
   });
@@ -920,13 +1090,18 @@ function table(headers, rows, opts = {}) {
   const tbody = el('tbody');
   rows.forEach((row, ri) => {
     const tr = el('tr');
-    if (opts.keys && opts.onRow) {
+    const rowable = rowsAreOpenable;
+    let zoneCell = null;
+    if (rowable) {
       tr.dataset.key = String(opts.keys[ri]);
       tr.classList.add('rowable');
-      activatable(tr, () => opts.onRow(tr.dataset.key), { pad: true });
+      if (String(opts.keys[ri]) === String(opts.openKey ?? '')) tr.classList.add('is-open');
+      zoneCell = el('td', 'dwellzone');
+      tr.appendChild(zoneCell);
     }
     row.forEach((cell, ci) => {
-      const hmeta = typeof headers[ci] === 'object' ? headers[ci] : {};
+      const h2 = headers[ci + (rowable ? 1 : 0)];
+      const hmeta = typeof h2 === 'object' ? h2 : {};
       const isObj = typeof cell === 'object' && cell !== null;
       const classes = [
         isObj && cell.num ? 'num' : '',
@@ -937,7 +1112,8 @@ function table(headers, rows, opts = {}) {
         .join(' ');
       const td = el('td', classes);
       const text = isObj ? cell.text : (cell ?? '—');
-      if (isObj && cell.star) {
+      if (isObj && cell.node) td.appendChild(cell.node);
+      else if (isObj && cell.star) {
         const b = el('button', `starbtn${cell.star.on ? ' on' : ''}`, cell.star.on ? '★' : '☆');
         b.dataset.tip = cell.star.on ? 'On your watchlist — tap to drop' : 'Watch this player: freezes today’s numbers so the drift shows';
         activatable(b, cell.star.onToggle);
@@ -947,12 +1123,30 @@ function table(headers, rows, opts = {}) {
       // A position column sorts by football order, never the alphabet —
       // "CB before CAM because C < B" is nobody's idea of a squad list.
       td.dataset.sort = hmeta.pos
-        ? String(posRank(String(text)))
-        : String(text === '—' ? '' : text).replace(/[^0-9.\-]/g, '') || String(text);
+        ? String(posRank(String(isObj && cell.sortText !== undefined ? cell.sortText : text)))
+        : isObj && cell.sort !== undefined
+          ? String(cell.sort)
+          : String(text === '—' ? '' : text).replace(/[^0-9.\-]/g, '') || String(text);
       if (isObj && cell.title) td.dataset.tip = cell.title;
       tr.appendChild(td);
     });
+    // Dwell arms only in the leading zone — the rest of the row stays safe to
+    // rest a pointer on while reading, which is what made the roster pleasant.
+    if (rowable) {
+      activatable(tr, () => opts.onRow(tr.dataset.key), { host: zoneCell, pad: true });
+    }
     tbody.appendChild(tr);
+
+    // The detail opens under the row it came from, not at the top of the page.
+    if (rowable && opts.detail && String(opts.keys[ri]) === String(opts.openKey ?? '')) {
+      const dr = el('tr', 'detailrow');
+      const dtd = el('td');
+      dtd.colSpan = headers.length;
+      const node = opts.detail(String(opts.keys[ri]));
+      if (node) dtd.appendChild(node);
+      dr.appendChild(dtd);
+      tbody.appendChild(dr);
+    }
   });
   t.appendChild(tbody);
   wrap.appendChild(t);
@@ -964,12 +1158,15 @@ function table(headers, rows, opts = {}) {
  * single screen. This is a companion — the answer has to be visible before the
  * loading screen ends. A row opens into the full card only when asked.
  */
+// Overall and ceiling are two facts, so they are two columns — an "89 → 91"
+// blob could not be sorted on either half.
 const ROSTER_COLUMNS = [
   { key: null, label: '' },
   { key: 'ingame', label: 'Pos' },
   { key: null, label: '' },
   { key: 'name', label: 'Player' },
-  { key: 'overall', label: 'Rating' },
+  { key: 'overall', label: 'OVR' },
+  { key: 'potential', label: 'POT' },
   { key: 'age', label: 'Age' },
   { key: 'growth', label: 'Δ' },
   { key: null, label: '' },
@@ -977,118 +1174,109 @@ const ROSTER_COLUMNS = [
   { key: 'minutes', label: 'Mins' },
 ];
 
-function renderPlayers(list) {
-  const wrap = el('div', 'roster');
+/**
+ * The roster, in the same table as every other squad view. Basic used to be a
+ * bespoke CSS grid while Stats, Attributes and Financial were real tables —
+ * so the four views of one squad looked like four different products. They are
+ * one engine now: same alignment, same sorting, same row behaviour, different
+ * columns.
+ */
+/** Face, name and the marks that change a decision — one cell, every table. */
+function playerNameCell(p) {
+  const box = el('span', 'pcell');
+  box.appendChild(faceOf(p, 22));
+  const nm = el('span', 'pcname');
+  nm.append(p.name);
+  if (p.nameProvisional) nm.appendChild(el('span', 'prov', '~'));
+  box.appendChild(nm);
+  const marks = el('span', 'rmarks');
+  if (p.injured) marks.appendChild(el('i', 'mk down', '✚'));
+  if (p.nationalTeam) marks.appendChild(el('i', 'mk info', '⚑'));
+  if (p.potentialTag === 'Special' || p.potentialTag === 'Exciting') marks.appendChild(el('i', 'mk gold', '◆'));
+  if (marks.childElementCount) box.appendChild(marks);
+  return box;
+}
 
-  const head = el('div', 'rhead');
-  for (const col of ROSTER_COLUMNS) {
-    const cell = el('span', null, col.label);
-    if (col.key) {
-      if (state.sort === col.key) {
-        cell.classList.add('on');
-        if (state.sortAsc) cell.classList.add('asc');
-      }
-      activatable(cell, () => {
-        state.sortAsc = state.sort === col.key ? !state.sortAsc : false;
-        state.sort = col.key;
-        localStorage.setItem('sort', col.key);
-        render();
-      });
-    }
-    head.appendChild(cell);
-  }
-  wrap.appendChild(head);
+function renderPlayers(list, opts = {}) {
+  const frag = document.createDocumentFragment();
+  const filtered = applyFilters(list).sort(
+    (a, b) => posRank(a.positionShort ?? '') - posRank(b.positionShort ?? '') || (b.overall ?? 0) - (a.overall ?? 0),
+  );
 
-  const cmp = (SORTS[state.sort] ?? SORTS.ingame).fn;
-  const filtered = applyFilters(list).sort((a, b) => (state.sortAsc ? -cmp(a, b) : cmp(a, b)));
+  if (state.rosterSel && !filtered.some((p) => p.playerId === state.rosterSel)) state.rosterSel = null;
+
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, opts.title ?? '👥 Squad'));
   if (!filtered.length) {
-    wrap.appendChild(el('p', 'empty', 'Nothing matches these filters.'));
-    return wrap;
+    panel.appendChild(el('p', 'empty', 'Nothing matches these filters.'));
+    frag.appendChild(panel);
+    return frag;
   }
 
-  for (const p of filtered) {
-    const row = el('div', `rrow ${p.advice.severity}`);
-
-    row.appendChild(el('span', 'rpos', p.positionShort ?? '—'));
-    row.appendChild(faceOf(p, 26));
-    const name = el('span', 'rname');
-    name.append(p.name);
-    if (p.nameProvisional) name.appendChild(el('span', 'prov', '~'));
-    row.appendChild(name);
-
-    const rate = el('span', 'rate');
-    rate.appendChild(el('span', `n ${tier(p.overall)}`, p.overall ?? '—'));
-    if (p.potential !== null && p.potential !== p.overall) {
-      rate.appendChild(el('span', 'arrow', '→'));
-      rate.appendChild(el('span', `n ceil ${tier(p.potential)}`, p.potential));
-    }
-    row.appendChild(rate);
-
-    row.appendChild(el('span', 'rage', p.age !== null ? `${p.age}y` : ''));
-
+  const nameCell = playerNameCell;
+  const deltaCell = (p) => {
     const g = delta(p.overallSeasonDelta);
-    const dcell = el('span', `rdelta ${g && g.text !== '0' ? g.cls : 'flat'}`);
+    const box = el('span', `rdelta ${g && g.text !== '0' ? g.cls : 'flat'}`);
     const arrow = trendArrow(p);
-    if (arrow) dcell.appendChild(arrow);
-    if (g && g.text !== '0') dcell.append(g.text);
-    row.appendChild(dcell);
+    if (arrow) box.appendChild(arrow);
+    if (g && g.text !== '0') box.append(g.text);
+    return box;
+  };
 
-    const marks = el('span', 'rmarks');
-    if (p.injured) marks.appendChild(el('i', 'mk down', '✚'));
-    if (p.nationalTeam) marks.appendChild(el('i', 'mk info', '⚑'));
-    if (p.potentialTag === 'Special' || p.potentialTag === 'Exciting') marks.appendChild(el('i', 'mk gold', '◆'));
-    row.appendChild(marks);
-
-    const act = settings.actionChips ? [p.advice, ...p.otherAdvice].find((a) => a.severity !== 'steady') : null;
-    row.appendChild(act ? el('span', `act ${act.severity}`, act.tag) : el('span', 'rquiet', ''));
-
-    row.appendChild(el('span', 'rmins', p.minutesThisSeason !== null ? `${p.minutesThisSeason}'` : ''));
-
-    row.title = [
-      p.form ? `Form ${p.form}` : null,
-      p.morale,
-      p.contractMonths !== null ? `${fmtTerm(p.contractMonths)} left on the deal` : null,
-      act ? act.line : null,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-
-    const shell = el('div', 'rshell');
-    shell.appendChild(row);
-
-    const openNow = state.open.has(p.playerId);
-    if (openNow) {
-      shell.classList.add('is-open');
-      // Dwell never re-fires on the row that is already open (skipWhen), so
-      // closing needs its own control, inside the card head where it cannot
-      // sit on top of the row's minutes column.
-      shell.appendChild(
-        playerCard(p, () => {
-          state.open.delete(p.playerId);
+  panel.appendChild(
+    table(
+      [
+        { label: 'Pos', pos: true },
+        'Player',
+        { label: 'OVR', num: true },
+        { label: 'POT', num: true },
+        { label: 'Age', num: true },
+        { label: 'Δ', num: true },
+        'Action',
+        { label: 'Mins', num: true },
+      ],
+      filtered.map((p) => {
+        const act = settings.actionChips ? [p.advice, ...p.otherAdvice].find((a) => a.severity !== 'steady') : null;
+        return [
+          { text: p.positionShort ?? '—', cls: 'posbadge' },
+          { node: nameCell(p), text: p.name, sort: p.name },
+          { text: p.overall ?? '—', num: true, tier: p.overall },
+          {
+            text: p.potential ?? '—',
+            num: true,
+            tier: p.potential,
+            title: (p.headroom ?? 0) > 0 ? `${p.headroom} still to grow` : undefined,
+          },
+          { text: p.age ?? '—', num: true },
+          { node: deltaCell(p), text: p.overallSeasonDelta ?? '', num: true, sort: p.overallSeasonDelta ?? -99 },
+          act ? { node: el('span', `act ${act.severity}`, act.tag), text: act.tag, title: act.line } : '',
+          { text: p.minutesThisSeason !== null ? `${p.minutesThisSeason}'` : '—', num: true },
+        ];
+      }),
+      {
+        keys: filtered.map((p) => p.playerId),
+        openKey: state.rosterSel,
+        detail: (key) => {
+          const sel = filtered.find((p) => p.playerId === Number(key));
+          return sel ? playerCard(sel, () => { state.rosterSel = null; render(); }, 'basic') : null;
+        },
+        onRow: (key) => {
+          const id = Number(key);
+          state.rosterSel = state.rosterSel === id ? null : id;
           render();
-        }),
-      );
-    }
-    activatable(
-      row,
-      () => {
-        if (state.open.has(p.playerId)) state.open.delete(p.playerId);
-        else state.open.add(p.playerId);
-        render();
+        },
       },
-      { pad: true, skipWhen: () => state.open.has(p.playerId) },
-    );
-
-    wrap.appendChild(shell);
-  }
-  wrap.appendChild(
+    ),
+  );
+  panel.appendChild(
     el(
       'p',
       'muted tiny rkey',
-      '⚑ national-team call-up · ◆ Special / Exciting ceiling · Δ rating change this season · Mins = minutes played · action colours: red act now, amber this window, blue keep an eye',
+      'Tap a row for the card. ⚑ national-team call-up · ◆ Special / Exciting ceiling · Δ rating change this season · action colours: red act now, amber this window, blue keep an eye.',
     ),
   );
-  return wrap;
+  frag.appendChild(panel);
+  return frag;
 }
 
 /**
@@ -1223,6 +1411,10 @@ function renderMatchday(doc) {
   const frag = document.createDocumentFragment();
   const byId = new Map([...doc.senior, ...doc.academy].map((p) => [p.playerId, p]));
   const nameOf = (id) => byId.get(id)?.name ?? `#${id}`;
+
+  // Depth first: team management starts with knowing where the squad is one
+  // injury from a hole.
+  frag.appendChild(renderDepth(doc));
 
   const top = el('div', 'panel');
   top.appendChild(el('h2', null, m.saved?.tacticName ?? 'Your XI'));
@@ -1496,105 +1688,323 @@ function renderMatchday(doc) {
   return frag;
 }
 
+/**
+ * A player you do not own. Same anatomy as the squad card, minus the parts
+ * that only mean something for your own players (advice, minutes, growth
+ * history) and plus the parts that decide a signing: what he costs, what he is
+ * elite at, and the full attribute sheet.
+ */
+function scoutCard(profile, onClose, extra) {
+  const p = profile;
+  const card = el('div', 'card scoutcard');
+
+  const head = el('div', 'head');
+  if (onClose) {
+    const closer = el('button', 'chip closer', 'Close ✕');
+    activatable(closer, onClose);
+    head.appendChild(closer);
+  }
+  head.appendChild(faceOf(p, 40));
+  head.appendChild(el('span', 'name', p.name));
+  if (p.positionShort) head.appendChild(el('span', 'badge-pos', p.positionShort));
+  const rates = el('div', 'rates');
+  for (const [lbl, v, ceil] of [['OVR', p.overall, false], ['POT', p.potential, true]]) {
+    const r = el('span', 'rate');
+    r.appendChild(el('span', 'lbl', lbl));
+    r.appendChild(el('span', `n ${ceil ? 'ceil ' : ''}${tier(v)}`, v ?? '—'));
+    rates.appendChild(r);
+  }
+  head.appendChild(rates);
+  card.appendChild(head);
+
+  const facts = el('div', 'facts');
+  if (p.nation) facts.appendChild(el('span', null, `${flagFor(p.nation)}${p.nation}`));
+  for (const bit of [
+    p.teamName,
+    p.league,
+    p.age !== null ? `${p.age}y` : null,
+    p.preferredPositions.length > 1 ? p.preferredPositions.join(' / ') : null,
+    p.foot ? `${p.foot} foot` : null,
+    p.height !== null ? `${p.height}cm` : null,
+    p.contractMonths !== null ? `${fmtTerm(p.contractMonths)} left` : null,
+  ].filter(Boolean)) {
+    facts.appendChild(el('span', null, bit));
+  }
+  const sm = starBadge('SM', p.skillMoves === null ? null : p.skillMoves + 1);
+  const wf = starBadge('WF', p.weakFoot);
+  if (sm) facts.appendChild(sm);
+  if (wf) facts.appendChild(wf);
+  card.appendChild(facts);
+
+  card.appendChild(
+    tileRow([
+      ['Fair value ~', p.ea ? moneyShort(p.ea.value) : null, p.ea ? `Walk away below ${moneyShort(p.ea.floor)}; a motivated buyer can be pushed to ${moneyShort(p.ea.ceiling)}.` : undefined],
+      ['Walk away', p.ea ? moneyShort(p.ea.floor) : null],
+      ['Push to', p.ea ? moneyShort(p.ea.ceiling) : null],
+      ['Wage', money(p.wage)],
+      ...(extra ?? []),
+    ]),
+  );
+
+  if (p.standout.length) {
+    const line = el('div', 'chipwrap');
+    for (const st of p.standout) {
+      const chip = el('span', 'so', `${prettyAttr(st.attr)} ${st.value}`);
+      chip.dataset.tip = `${st.percentile}th percentile among ${p.positionShort ?? 'peers'} in this world`;
+      line.appendChild(chip);
+    }
+    card.appendChild(cardSection('ELITE FOR HIS POSITION', line));
+  }
+
+  if (p.playStyles.length) {
+    const styles = el('div', 'chipwrap');
+    for (const st of p.playStyles) {
+      const node = el('span', st.plus ? 'style plus' : 'style', st.name + (st.plus ? '+' : ''));
+      node.dataset.tip = `${st.category} PlayStyle`;
+      styles.appendChild(node);
+    }
+    card.appendChild(cardSection('PLAYSTYLES', styles));
+  }
+
+  const wrap = el('div', 'attrsheet');
+  for (const group of p.groups) {
+    const col = el('div', 'asheet-group');
+    const gh = el('div', 'asheet-head');
+    gh.appendChild(el('span', 'gname', group.name));
+    const mean = el('span', 'gval-wrap');
+    mean.appendChild(el('b', `gval ${tier(group.mean)}`, group.mean ?? '—'));
+    gh.appendChild(mean);
+    col.appendChild(gh);
+    for (const a of group.attributes) {
+      const row = el('div', 'asheet-row');
+      row.appendChild(el('span', 'an', prettyAttr(a.name)));
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill ${tier(a.value)}`);
+      fill.style.width = `${Math.max(3, Math.round(((a.value ?? 0) / 99) * 100))}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      row.appendChild(el('span', `av ${tier(a.value)}`, a.value ?? '—'));
+      col.appendChild(row);
+    }
+    wrap.appendChild(col);
+  }
+  card.appendChild(cardSection('THE SHEET', wrap));
+  return card;
+}
+
+/** Money with its unit under it, so a column of figures reads at a glance. */
+function moneyCell(n, unit) {
+  const box = el('span', 'mcell');
+  if (n === null || n === undefined) {
+    box.append('—');
+    return box;
+  }
+  box.appendChild(el('b', null, moneyShort(n)));
+  if (unit) box.appendChild(el('i', null, `/${unit}`));
+  return box;
+}
+
+/** A contract as a term plus a runway, so "running down" is visible. */
+function contractCell(months) {
+  const box = el('span', 'ccell');
+  if (months === null || months === undefined) {
+    box.append('—');
+    return box;
+  }
+  box.appendChild(el('b', null, fmtTerm(months)));
+  const track = el('div', 'btrack');
+  const fill = el('div', `bfill ${months <= 6 ? 't1' : months <= 18 ? 't2' : 't3'}`);
+  fill.style.width = `${Math.max(4, Math.min(100, Math.round((months / 60) * 100)))}%`;
+  track.appendChild(fill);
+  box.appendChild(track);
+  box.dataset.tip = months <= 6 ? 'Inside six months — he can talk to anyone soon.' : 'Bar is scaled against a five-year deal.';
+  return box;
+}
+
+/** Floor, fair value and ceiling as one figure with its range beneath. */
+function valuationCell(ea) {
+  const box = el('span', 'vcell');
+  if (!ea) {
+    box.append('—');
+    return box;
+  }
+  box.appendChild(el('b', 'vval', moneyShort(ea.value)));
+  const range = el('span', 'vrange');
+  range.appendChild(el('i', 'vlo', moneyShort(ea.floor)));
+  range.appendChild(el('span', 'vsep', '–'));
+  range.appendChild(el('i', 'vhi', moneyShort(ea.ceiling)));
+  box.appendChild(range);
+  box.dataset.tip = `Walk away below ${moneyShort(ea.floor)}; open near ${moneyShort(ea.value)}; a motivated buyer can be pushed to ${moneyShort(ea.ceiling)}.`;
+  return box;
+}
+
+/** The case for a signing, as badges rather than a semicolon-jammed sentence. */
+function reasonTags(x) {
+  const box = el('span', 'reasons');
+  for (const t of x.reasonTags ?? []) {
+    const chip = el('span', `rtag rt-${t.kind}`, t.text);
+    chip.dataset.tip = t.detail;
+    box.appendChild(chip);
+  }
+  if (!box.childElementCount && x.reasons?.length) box.append(x.reasons.join(' · '));
+  return box;
+}
+
+/** Look up a scouted profile by id, or null when the scan has not seen him. */
+const profileOf = (doc, id) => (doc.scoutProfiles ?? []).find((x) => x.playerId === id) ?? null;
+
+/** Shared: open a scout card above a table, or say why it cannot. */
+function scoutDetail(doc, id, onClose, extra) {
+  const prof = profileOf(doc, id);
+  if (prof) return scoutCard(prof, onClose, extra);
+  const box = el('div', 'panel');
+  box.appendChild(
+    el('p', 'muted tiny', 'No profile this snapshot — he is outside the current scan, so his sheet is not in the document. The frozen numbers below still hold.'),
+  );
+  return box;
+}
+
+/**
+ * Synergy, as connections rather than a spreadsheet.
+ *
+ * A "pattern" is a way two players help each other — a runner and a passer, a
+ * crosser and a header of the ball. Each link is scored √(supplier × receiver)
+ * over the attributes that pattern actually needs. What matters on screen is
+ * WHO connects to WHOM, HOW STRONGLY, and WHAT TO DO — so that is what the
+ * page shows, in that order.
+ */
+/**
+ * The depth chart: every position, first choice down to nothing, with the age
+ * behind each name. It answers the two questions a squad list buries — where
+ * would one injury hurt, and where is the succession already in the building.
+ */
+function renderDepth(doc) {
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, '🪜 Depth chart'));
+  panel.appendChild(
+    el('p', 'muted tiny', 'Sorted by our fit in that position, not by the game\u2019s overall — a converted fullback ranks where he would actually play. One name deep is one injury from a problem.'),
+  );
+
+  const ORDER = ['GK', 'RB', 'CB', 'LB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST'];
+  const bySlot = new Map();
+  for (const p of doc.senior) {
+    const slot = p.positionShort ?? p.bestSlot;
+    if (!slot) continue;
+    bySlot.set(slot, [...(bySlot.get(slot) ?? []), p]);
+  }
+  const grid = el('div', 'depthgrid');
+  const slots = [...new Set([...ORDER.filter((x) => bySlot.has(x)), ...bySlot.keys()])];
+  for (const slot of slots) {
+    const men = (bySlot.get(slot) ?? []).sort((a, b) => (b.overall ?? 0) - (a.overall ?? 0));
+    const col = el('div', `depthcol${men.length <= 1 ? ' thin' : ''}`);
+    const head = el('div', 'depthhead');
+    head.appendChild(el('span', 'pos-pill', slot));
+    head.appendChild(el('span', 'depthn', `${men.length} deep`));
+    col.appendChild(head);
+    men.slice(0, 4).forEach((p, i) => {
+      const row = el('div', `depthman${i === 0 ? ' first' : ''}`);
+      row.appendChild(el('i', 'depthrank', String(i + 1)));
+      const nm = el('span', 'depthname', p.name.split(' ').pop());
+      row.appendChild(nm);
+      row.appendChild(el('span', `depthovr ${tier(p.overall)}`, String(p.overall ?? '—')));
+      row.appendChild(el('span', 'depthage', p.age !== null ? `${p.age}` : ''));
+      row.dataset.tip = `${p.name} · ${p.overall}${p.potential && p.potential !== p.overall ? ` → ${p.potential}` : ''} · ${p.age}y${p.injured ? ' · injured' : ''}`;
+      col.appendChild(row);
+    });
+    if (!men.length) col.appendChild(el('p', 'muted tiny', 'nobody'));
+    if (men.length === 1) col.appendChild(el('p', 'depthwarn', 'one injury from a hole'));
+    grid.appendChild(col);
+  }
+  panel.appendChild(grid);
+  return panel;
+}
+
 function renderSynergy(doc) {
   const frag = document.createDocumentFragment();
   const byId = new Map([...doc.senior, ...doc.academy].map((p) => [p.playerId, p]));
   const nameOf = (id) => byId.get(id)?.name ?? `#${id}`;
+  const shortName = (id) => (byId.get(id)?.name ?? `#${id}`).split(' ').pop();
+  const posOf = (id) => byId.get(id)?.positionShort ?? '';
   const syn = doc.synergy;
 
-  // The headline first: how connected the XI is, at a glance.
+  // --- what it is, and how connected the XI actually is
   {
     const hero = el('div', 'panel');
     hero.appendChild(el('h2', null, '🕸 Synergy'));
-    const line = el('div', 'hero-line');
-    const cell = (v, l2, cls) => {
-      const c2 = el('span', `stat big${cls ? ` ${cls}` : ''}`);
-      c2.appendChild(el('b', null, String(v)));
-      c2.appendChild(el('i', null, l2));
-      line.appendChild(c2);
-    };
-    cell(syn.xi?.teamScore ?? '—', 'XI connection', (syn.xi?.teamScore ?? 0) >= 70 ? 'h-up' : '');
-    cell(syn.xi?.links?.length ?? 0, 'live links', '');
-    cell(syn.xi?.coldPairs?.length ?? 0, 'cold pairs', (syn.xi?.coldPairs?.length ?? 0) > 2 ? 'h-down' : '');
-    cell(syn.partnerships.length, 'squad patterns', '');
-    hero.appendChild(line);
-    const top = syn.partnerships[0];
-    if (top) hero.appendChild(el('p', 'tipline', `Strongest pattern in the squad: ${top.channel} — ${nameOf(top.supplier)} → ${nameOf(top.receiver)} at ${top.strength}.`));
+    hero.appendChild(
+      el('p', 'muted', 'Two players “connect” when one supplies what the other uses — a fullback who overlaps into a winger who drifts inside, a passer into a runner. Every pair in your squad is scored on every pattern; the strongest links are the ones worth building the XI around.'),
+    );
+    hero.appendChild(
+      tileRow([
+        ['XI connection', syn.xi?.teamScore ?? '—', 'Mean strength of the links inside your current shape.', (syn.xi?.teamScore ?? 0) >= 70 ? 'good' : ''],
+        ['Live links', syn.xi?.links?.length ?? 0, 'Adjacent pairs in the shape that clear the threshold.'],
+        ['Cold pairs', syn.xi?.coldPairs?.length ?? 0, 'Adjacent in the shape with nothing between them.', (syn.xi?.coldPairs?.length ?? 0) > 2 ? 'warn' : ''],
+        ['Squad patterns', syn.partnerships.length, 'Every scored pair in the squad, XI or not.'],
+      ]),
+    );
     frag.appendChild(hero);
   }
 
-  const decompose = (l) =>
-    `${nameOf(l.supplier)} supplies ${l.supplierScore}, ${nameOf(l.receiver)} receives ${l.receiverScore} — ` +
-    `strength √(${l.supplierScore}×${l.receiverScore})` +
-    (l.amplifiedBy.length ? ` +${l.amplifiedBy.join(', ')}` : '') +
-    `. ${l.why}.`;
+  // --- the connections themselves, as cards
+  const linkCard = (l, tagline) => {
+    const box = el('div', 'linkcard');
+    const head = el('div', 'lchead');
+    head.appendChild(el('span', 'lchannel', l.channel));
+    const strength = el('span', `lcstrength ${tier(l.strength)}`, String(l.strength));
+    head.appendChild(strength);
+    box.appendChild(head);
 
-  // --- the XI, as a network
-  if (syn.xi) {
-    const panel = el('div', 'panel');
-    panel.appendChild(el('h2', null, `Your XI connects at ${syn.xi.teamScore ?? '—'}`));
-    panel.appendChild(
-      el(
-        'p',
-        'muted',
-        'Pairs the formation stands next to each other, scored on the strongest pattern between them. ' +
-          'Strength is √(supplier × receiver) over declared attributes, nudged by a directly relevant PlayStyle — ' +
-          'a ranking of your own options, never a prediction.',
-      ),
-    );
-    panel.appendChild(
-      table(
-        ['Pattern', 'From', 'To', { label: 'Supply', num: true }, { label: 'Receive', num: true }, { label: 'Strength', num: true }, 'Amplified by'],
-        syn.xi.links.map((l) => [
-          l.channel,
-          nameOf(l.supplier),
-          nameOf(l.receiver),
-          { text: l.supplierScore, num: true, tier: l.supplierScore },
-          { text: l.receiverScore, num: true, tier: l.receiverScore },
-          { text: l.strength, num: true, tier: l.strength },
-          l.amplifiedBy.join(', ') || '—',
-        ]),
-      ),
-    );
-    if (syn.xi.coldPairs.length) {
-      panel.appendChild(
-        el(
-          'p',
-          'muted tiny',
-          `Not connecting: ${syn.xi.coldPairs
-            .slice(0, 6)
-            .map((c) => `${nameOf(c.a)} ↔ ${nameOf(c.b)}`)
-            .join(' · ')}${syn.xi.coldPairs.length > 6 ? ` +${syn.xi.coldPairs.length - 6} more` : ''} — ` +
-            'adjacent in the shape, but no pattern between them clears 55.',
-        ),
-      );
+    const pair = el('div', 'lcpair');
+    const a = el('div', 'lcplayer');
+    a.appendChild(el('b', null, shortName(l.supplier)));
+    a.appendChild(el('span', 'lcpos', posOf(l.supplier)));
+    a.appendChild(el('span', 'lcscore', `supplies ${l.supplierScore}`));
+    const arrow = el('div', 'lcarrow', '→');
+    const b = el('div', 'lcplayer');
+    b.appendChild(el('b', null, shortName(l.receiver)));
+    b.appendChild(el('span', 'lcpos', posOf(l.receiver)));
+    b.appendChild(el('span', 'lcscore', `receives ${l.receiverScore}`));
+    pair.appendChild(a);
+    pair.appendChild(arrow);
+    pair.appendChild(b);
+    box.appendChild(pair);
+
+    const track = el('div', 'btrack');
+    const fill = el('div', `bfill ${tier(l.strength)}`);
+    fill.style.width = `${Math.max(4, Math.min(100, l.strength))}%`;
+    track.appendChild(fill);
+    box.appendChild(track);
+
+    box.appendChild(el('p', 'lcwhy', l.why));
+    if (l.amplifiedBy?.length) {
+      const amp = el('div', 'chipwrap');
+      for (const x of l.amplifiedBy) amp.appendChild(el('span', 'style plus', x));
+      box.appendChild(amp);
     }
+    if (tagline) box.appendChild(el('p', 'muted tiny', tagline));
+    box.dataset.tip = `${nameOf(l.supplier)} supplies ${l.supplierScore}, ${nameOf(l.receiver)} receives ${l.receiverScore} — strength is √(supplier × receiver)${l.amplifiedBy?.length ? `, lifted by ${l.amplifiedBy.join(', ')}` : ''}.`;
+    return box;
+  };
+
+  {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, '⚡ Your strongest connections'));
+    const grid = el('div', 'linkgrid');
+    const xiPair = new Set(
+      (syn.xi?.links ?? []).map((l) => `${Math.min(l.supplier, l.receiver)}-${Math.max(l.supplier, l.receiver)}`),
+    );
+    for (const l of syn.partnerships.slice(0, 6)) {
+      const inXI = xiPair.has(`${Math.min(l.supplier, l.receiver)}-${Math.max(l.supplier, l.receiver)}`);
+      grid.appendChild(linkCard(l, inXI ? 'Already side by side in your shape.' : 'Not adjacent in the current shape — moving them together is free strength.'));
+    }
+    panel.appendChild(grid);
     frag.appendChild(panel);
   }
 
-  // --- best partnerships across the whole squad
-  const best = el('div', 'panel');
-  best.appendChild(el('h2', null, `Strongest partnerships in the squad`));
-  best.appendChild(
-    el('p', 'muted', 'Every pair in the squad, every pattern, strongest first — including pairs your current XI keeps apart.'),
-  );
-  best.appendChild(
-    table(
-      ['Pattern', 'Pair', { label: 'Strength', num: true }, 'Read'],
-      syn.partnerships.slice(0, 14).map((l) => [
-        l.channel,
-        `${nameOf(l.supplier)} → ${nameOf(l.receiver)}`,
-        { text: l.strength, num: true, tier: l.strength },
-        { text: l.why, title: decompose(l), cls: 'wrap' },
-      ]),
-    ),
-  );
-  frag.appendChild(best);
-
-  // --- what to actually do about it
+  // --- the three biggest levers
   {
     const act = el('div', 'panel');
-    act.appendChild(el('h2', null, '🔧 How to raise it'));
+    act.appendChild(el('h2', null, '🔧 What to do about it'));
     const moves = [];
     const xiPair = new Set(
       (syn.xi?.links ?? []).map((l) => `${Math.min(l.supplier, l.receiver)}-${Math.max(l.supplier, l.receiver)}`),
@@ -1602,91 +2012,76 @@ function renderSynergy(doc) {
     for (const l of syn.partnerships
       .filter((l2) => !xiPair.has(`${Math.min(l2.supplier, l2.receiver)}-${Math.max(l2.supplier, l2.receiver)}`))
       .slice(0, 3)) {
-      moves.push(
-        `Field ${nameOf(l.supplier)} and ${nameOf(l.receiver)} next to each other — their ${l.channel.toLowerCase()} link scores ${l.strength}, but the current shape keeps them apart.`,
-      );
+      moves.push([
+        'Field them together',
+        `${nameOf(l.supplier)} + ${nameOf(l.receiver)}`,
+        `Their ${l.channel.toLowerCase()} link scores ${l.strength}, and the current shape keeps them apart.`,
+      ]);
     }
     for (const t of [...(doc.transfers?.targets ?? [])]
       .filter((t2) => t2.synergy?.[0])
       .sort((a, b) => (b.synergy[0]?.strength ?? 0) - (a.synergy[0]?.strength ?? 0))
       .slice(0, 2)) {
-      moves.push(
-        `Sign ${t.name} (${t.posShort ?? t.slot}) — the ${t.synergy[0].channel.toLowerCase()} link with this squad scores ${t.synergy[0].strength}, the best on the shopping list.`,
-      );
+      moves.push([
+        'Sign him',
+        `${t.name} (${t.posShort ?? t.slot})`,
+        `His ${t.synergy[0].channel.toLowerCase()} link with this squad scores ${t.synergy[0].strength} — the best on the shopping list.`,
+      ]);
     }
     if (syn.xi?.coldPairs?.length) {
       const c = syn.xi.coldPairs[0];
-      moves.push(
-        `${nameOf(c.a)} and ${nameOf(c.b)} stand next to each other with no pattern between them — swap one of them with a teammate from the partnerships table above, or route play around that side.`,
-      );
+      moves.push([
+        'Cold spot',
+        `${nameOf(c.a)} ↔ ${nameOf(c.b)}`,
+        'Side by side in the shape with no pattern between them — swap one, or route play down the other side.',
+      ]);
     }
     if (moves.length) {
-      for (const line of moves) act.appendChild(el('p', 'tipline', line));
-      act.appendChild(el('p', 'muted tiny', 'Same math as the tables — these are the three biggest levers it found, not a plan it invented.'));
-      frag.appendChild(act);
+      for (const [label, who, why] of moves) {
+        const row = el('div', 'todo');
+        row.appendChild(el('b', null, label));
+        row.appendChild(el('span', 'who', who));
+        row.appendChild(el('span', 'why', why));
+        act.appendChild(row);
+      }
+      act.appendChild(el('p', 'muted tiny', 'The same arithmetic as the cards above — these are the biggest levers it found, not a plan it invented.'));
+    } else {
+      act.appendChild(el('p', 'muted tiny', 'Your shape already fields the strongest links it can.'));
     }
+    frag.appendChild(act);
   }
 
-  // --- units: coverage and gain
-  if (syn.units.length) {
-    const units = el('div', 'panel');
-    units.appendChild(el('h2', null, 'Pairings that share one job'));
-    units.appendChild(
-      el(
-        'p',
-        'muted',
-        'Coverage is how well the pair handles every duty of the unit between them; gain is what the pairing adds over ' +
-          'its better half alone. High gain means they complete each other. Zero gain means you picked the same player twice.',
-      ),
+  // --- the rest, folded away
+  {
+    const more = el('div', 'panel');
+    more.appendChild(el('h2', null, '📚 Every pattern in the squad'));
+    more.appendChild(
+      el('p', 'muted tiny', `${syn.partnerships.length} scored pairs, strongest first. Percentiles come from the ${syn.worldPlayers.toLocaleString('en-GB')} players in this world.`),
     );
-    units.appendChild(
+    more.appendChild(
       table(
-        ['Unit', 'Pair', { label: 'Coverage', num: true }, { label: 'Gain', num: true }, 'Who carries what'],
-        syn.units.slice(0, 10).map((u) => [
-          u.unit,
-          `${nameOf(u.a)} + ${nameOf(u.b)}`,
-          { text: u.coverage, num: true, tier: u.coverage },
-          { text: u.gain > 0 ? `+${u.gain}` : u.gain, num: true },
-          {
-            text: u.perDuty.map((d) => `${d.duty}: ${nameOf(d.carrier).split(' ').pop()}`).join(' · '),
-            title: u.perDuty.map((d) => `${d.duty}: ${nameOf(d.carrier)} ${d.covered}`).join('\n'),
-            cls: 'wrap',
-          },
+        ['Pattern', 'Supplies', 'Receives', { label: 'Strength', num: true }, 'What it means'],
+        syn.partnerships.slice(0, 20).map((l) => [
+          l.channel,
+          `${shortName(l.supplier)} ${l.supplierScore}`,
+          `${shortName(l.receiver)} ${l.receiverScore}`,
+          { text: l.strength, num: true, tier: l.strength },
+          { text: l.why, cls: 'wrap' },
         ]),
+        { tight: true },
       ),
     );
-    frag.appendChild(units);
+    if (syn.catalogue?.length) {
+      const cat = el('div', 'chipwrap');
+      for (const c of syn.catalogue) {
+        const chip = el('span', 'chipish', c.name);
+        chip.dataset.tip = c.why;
+        cat.appendChild(chip);
+      }
+      more.appendChild(cardSection('THE PATTERNS COMPANION LOOKS FOR', cat));
+    }
+    frag.appendChild(more);
   }
-
-  // --- redundancy
-  if (syn.redundancies.length) {
-    const red = el('div', 'panel');
-    red.appendChild(el('h2', null, 'Similar profiles'));
-    red.appendChild(
-      el(
-        'p',
-        'muted',
-        'Same position, near-identical attribute shape against the world population for that position. ' +
-          'Not a criticism of either player — but the second one adds depth, not variety.',
-      ),
-    );
-    red.appendChild(
-      table(
-        ['Position', 'Pair', { label: 'Similarity', num: true }],
-        syn.redundancies.map((r) => [r.slot, `${nameOf(r.a)} + ${nameOf(r.b)}`, { text: r.similarity, num: true }]),
-      ),
-    );
-    frag.appendChild(red);
-  }
-
-  const cat = el('div', 'panel');
-  cat.appendChild(el('h2', null, 'The patterns'));
-  cat.appendChild(
-    el('p', 'muted tiny', `Computed against the ${syn.worldPlayers.toLocaleString('en-GB')} players in this career's world.`),
-  );
-  cat.appendChild(table(['Pattern', 'What it is'], syn.catalogue.map((c) => [c.name, c.why])));
-  frag.appendChild(cat);
-
   return frag;
 }
 
@@ -1697,13 +2092,26 @@ function renderTransfers(doc) {
   const short = t.gaps.filter((g) => g.severity !== 'none');
   if (short.length) {
     const gaps = el('div', 'panel');
-    gaps.appendChild(el('h2', null, 'Where the squad is short'));
-    gaps.appendChild(
-      table(
-        ['Position', { label: 'Natural cover', num: true }, { label: 'Best you have', num: true }, 'Verdict'],
-        short.map((g) => [slotLabel(g.slot), { text: g.cover, num: true }, { text: g.bestFit ?? '—', num: true }, g.note]),
-      ),
-    );
+    gaps.appendChild(el('h2', null, '🕳 Where the squad is short'));
+    const grid = el('div', 'gapgrid');
+    for (const g of short) {
+      const box = el('div', `gapcard ${g.severity}`);
+      box.appendChild(el('span', 'pos-pill', g.slot));
+      box.appendChild(el('b', 'gapname', slotLabel(g.slot)));
+      const nums = el('div', 'gapnums');
+      const add = (lbl, v) => {
+        const c = el('span', 'gapnum');
+        c.appendChild(el('i', null, lbl));
+        c.appendChild(el('b', null, String(v)));
+        nums.appendChild(c);
+      };
+      add('Cover', g.cover);
+      add('Best', g.bestFit ?? '—');
+      box.appendChild(nums);
+      box.appendChild(el('p', 'gapnote', g.note));
+      grid.appendChild(box);
+    }
+    gaps.appendChild(grid);
     frag.appendChild(gaps);
   }
 
@@ -1740,8 +2148,21 @@ function renderTransfers(doc) {
   // Default order is upgrade; every column header sorts the table itself.
   list.sort((a, b) => b.upgrade - a.upgrade);
 
+  // A selected target opens his real card — attributes, PlayStyles, price.
+  if (state.targetSel && !list.some((x) => x.playerId === state.targetSel)) state.targetSel = null;
+  if (state.targetSel) {
+    const sel = list.find((x) => x.playerId === state.targetSel);
+    frag.appendChild(
+      scoutDetail(doc, state.targetSel, () => { state.targetSel = null; render(); }, [
+        ['Fit here', sel?.fit ?? null, 'Our rating for him in the slot he would fill.'],
+        ['Upgrade', sel && sel.upgrade > 0 ? `+${Math.round(sel.upgrade * 10) / 10}` : null, 'How much better his fit is than your best in that slot.'],
+        ['Synergy', sel?.synergy?.[0]?.strength ?? null, sel?.synergy?.[0]?.channel],
+      ]),
+    );
+  }
+
   const targets = el('div', 'panel');
-  targets.appendChild(el('h2', null, `${list.length} targets from ${t.scanned.toLocaleString('en-GB')} scanned`));
+  targets.appendChild(el('h2', null, `🎯 ${list.length} targets from ${t.scanned.toLocaleString('en-GB')} scanned`));
   targets.appendChild(modeBar);
   targets.appendChild(
     el(
@@ -1781,10 +2202,18 @@ function renderTransfers(doc) {
             x.feeGuide ? `This world has paid ${moneyShort(x.feeGuide.low)}–${moneyShort(x.feeGuide.high)} for this profile (${x.feeGuide.sample} deals)` : null,
           ].filter(Boolean).join('\n') || undefined,
         },
-        { text: x.reasons.join('; ') },
+        { node: reasonTags(x), text: x.reasons.join('; '), sort: x.reasons.length },
       ]),
+      {
+        keys: list.slice(0, 40).map((x) => x.playerId),
+        onRow: (key) => {
+          state.targetSel = Number(key);
+          render();
+        },
+      },
     ),
   );
+  targets.appendChild(el('p', 'muted tiny', 'Tap a row for his full sheet: attributes, PlayStyles, and what he is elite at for the position.'));
   frag.appendChild(targets);
 
   if (doc.deals.observed.length) {
@@ -1809,205 +2238,153 @@ function renderTransfers(doc) {
   return frag;
 }
 
+/**
+ * Wages, as a board rather than a spreadsheet.
+ *
+ * The bill and its shape first, then one card per player: what he earns, how
+ * long is left, whether that is fair against his role band, and the deal to
+ * put on the table. Tapping a card opens his money page — both packages, the
+ * valuation, the clause call.
+ */
 function renderWages(doc) {
   const frag = document.createDocumentFragment();
   const w = doc.wages;
-  const byId = new Map([...doc.senior, ...doc.academy].map((p) => [p.playerId, p]));
-  const nameOf = (id) => byId.get(id)?.name ?? `#${id}`;
+  const renewalOf = new Map(w.renewals.map((r) => [r.playerId, r]));
+  const assessOf = new Map(w.assessmentList.map((a) => [a.playerId, a]));
+  const everyone = [...doc.senior, ...doc.academy.filter((p) => renewalOf.has(p.playerId))].sort(
+    (a, b) => posRank(a.positionShort ?? '') - posRank(b.positionShort ?? '') || (b.overall ?? 0) - (a.overall ?? 0),
+  );
+  const dueNow = everyone.filter((p) => (renewalOf.get(p.playerId)?.urgency ?? 'later') === 'now');
+  const dueSoon = everyone.filter((p) => (renewalOf.get(p.playerId)?.urgency ?? 'later') === 'soon');
+  const overpaid = everyone.filter((p) => assessOf.get(p.playerId)?.verdict === 'over');
+  const underpaid = everyone.filter((p) => assessOf.get(p.playerId)?.verdict === 'under');
+  const top = [...everyone].sort((a, b) => (b.wage ?? 0) - (a.wage ?? 0))[0];
 
-  // Master-detail over the WHOLE squad: every row carries its wage, so the
-  // number sits next to the name — no trek to a detail pane, which on a phone
-  // was a full screen of scrolling away. "Worth doing" is a filter, not the
-  // universe.
+  // --- the bill, and its shape
   {
-    const renewalOf = new Map(w.renewals.map((r) => [r.playerId, r]));
-    // The whole senior squad, plus any academy prospect the rules want renewed
-    // — an academy deal running down is exactly the renewal you cannot miss.
-    const everyone = [...doc.senior, ...doc.academy.filter((p) => renewalOf.has(p.playerId))].sort(
-      (a, b) => posRank(a.positionShort ?? '') - posRank(b.positionShort ?? '') || (b.overall ?? 0) - (a.overall ?? 0),
-    );
-    const dueCount = w.renewals.filter((r) => r.urgency !== 'later').length;
-    const listed =
-      state.wageFilter === 'due'
-        ? everyone.filter((p) => (renewalOf.get(p.playerId)?.urgency ?? 'later') !== 'later')
-        : everyone;
-
     const panel = el('div', 'panel');
-    panel.appendChild(el('h2', null, `Wages & renewals — ${listed.length} of ${everyone.length}`));
+    panel.appendChild(el('h2', null, '💷 The wage bill'));
     panel.appendChild(
-      el(
-        'p',
-        'muted',
-        'Every player with a recorded wage gets a proposal — role, term, wage, bonus, the clause call. Two shapes each: ' +
-          'flat, and a lower base with appearance money. Anchored to the role band and current wage; the save records no ' +
-          'wage demand, so none is invented. When to renew is your call.',
-      ),
+      tileRow([
+        ['Weekly bill', money(w.totalBill)],
+        ['Squad', w.squadSize],
+        ['Median wage', money(w.median)],
+        ['Top earner', top ? `${top.name.split(' ').pop()} ${moneyShort(top.wage)}` : null],
+        ['Due now', dueNow.length || null, 'Contracts inside six months.', dueNow.length ? 'warn' : ''],
+        ['Overpaid', overpaid.length || null, 'Paid well above their role band.', overpaid.length ? 'warn' : ''],
+        ['Underpaid', underpaid.length || null, 'Paid well below their role band — cheap to lock down now.'],
+      ]),
     );
-
-    const modes = el('div', 'chiprow');
-    for (const [label, mode] of [[`Whole squad ${everyone.length}`, 'all'], [`Due now or soon ${dueCount}`, 'due']]) {
-      const chip = el('button', `chip${(state.wageFilter ?? 'all') === mode ? ' on' : ''}`, label);
-      activatable(
-        chip,
-        () => {
-          state.wageFilter = mode;
-          render();
-        },
-        { skipWhen: () => (state.wageFilter ?? 'all') === mode },
-      );
-      modes.appendChild(chip);
-    }
-    panel.appendChild(modes);
-
-    const split = el('div', 'split');
-    const left = el('div', 'split-list');
-    const right = el('div', 'split-detail');
-
-    if (!state.wageSel || !listed.some((p) => p.playerId === state.wageSel)) {
-      state.wageSel = listed[0]?.playerId ?? null;
-    }
-
-    const urgencyLabel = { now: 'Now', soon: 'Soon', later: 'No rush' };
-    const urgencyCls = { now: 'urgent', soon: 'action', later: 'watch' };
-
-    for (const p of listed) {
-      const r = renewalOf.get(p.playerId);
-      const row = el('div', `srow${p.playerId === state.wageSel ? ' sel' : ''}`);
-      row.appendChild(el('span', 'rpos', p.positionShort ?? '—'));
-      row.appendChild(el('span', 'sname', p.name));
-      row.appendChild(r ? el('span', `act ${urgencyCls[r.urgency]}`, urgencyLabel[r.urgency]) : el('span', 'act none', ''));
-      row.appendChild(el('span', 'smeta', p.contractMonths === null ? '' : fmtTerm(p.contractMonths)));
-      row.appendChild(el('span', 'swage', money(p.wage)));
-      activatable(
-        row,
-        () => {
-          state.wageSel = p.playerId;
-          render();
-        },
-        { pad: true, skipWhen: () => state.wageSel === p.playerId },
-      );
-      left.appendChild(row);
-    }
-
-    const selPlayer = byId.get(state.wageSel);
-    const sel = renewalOf.get(state.wageSel);
-    if (selPlayer && !sel) {
-      // No proposal for this player — say why the rules stayed quiet instead
-      // of showing an empty pane.
-      const p = selPlayer;
-      const head = el('div', 'head');
-      head.appendChild(el('span', 'name', p.name));
-      if (p.positionShort) head.appendChild(el('span', 'badge-pos', p.positionShort));
-      right.appendChild(head);
-      right.appendChild(
-        el('p', 'muted', `On ${money(p.wage)} a week${p.contractMonths === null ? '' : `, ${fmtTerm(p.contractMonths)} left`}${p.squadRole ? ` · ${p.squadRole}` : ''}.`),
-      );
-      const assess = w.assessmentList.find((a) => a.playerId === p.playerId);
-      if (assess?.note) right.appendChild(el('p', 'tipline', assess.note));
-      right.appendChild(
-        el(
-          'p',
-          'muted tiny',
-          'No renewal proposed: the contract is long enough and the wage close enough to the band that renegotiating now buys nothing. When either changes, a proposal appears here.',
-        ),
-      );
-    }
-    if (selPlayer && sel) {
-      const p = selPlayer;
-      const head = el('div', 'head');
-      head.appendChild(el('span', 'name', p.name));
-      if (p.positionShort) head.appendChild(el('span', 'badge-pos', p.positionShort));
-      right.appendChild(head);
-      right.appendChild(
-        el('p', 'muted', `On ${money(sel.currentWage)} a week${sel.monthsLeft === null ? '' : `, ${fmtTerm(sel.monthsLeft)} left`}${p.squadRole && p.squadRole !== 'None' ? ` · ${p.squadRole}` : ''}${p.age !== null ? ` · ${p.age}y` : ''}.`),
-      );
-      right.appendChild(
-        el('p', 'muted tiny', `Longest total term the game will take at this age: ~${sel.maxYears} years. How much of it to use is your preference, not a rule.`),
-      );
-      // The Amad lesson: a fast riser renewed on yesterday's number comes back
-      // for more, and the game blocks a second renegotiation — then the
-      // transfer request lands. Pay tomorrow's wage the first time.
-      if ((p.headroom ?? 0) >= 4 || p.trend === 'surge') {
-        const warn = el('p', 'tipline');
-        warn.textContent = `⚠ Still growing (${p.overall}→${p.potential}). Renew once and renew generously — after a renewal the game refuses another for a long stretch, and a riser who outgrows his new wage can force a move. The flat option below already prices the growth in.`;
-        right.appendChild(warn);
+    if (w.bands.length) {
+      const bars = el('div', 'gbars');
+      const max = Math.max(...w.bands.map((b) => b.high));
+      for (const b of w.bands) {
+        const row = el('div', 'gbar');
+        row.appendChild(el('span', 'gbname', `${b.role} ×${b.count}`));
+        // Low → median → high as a real range, not one number pretending.
+        const track = el('div', 'btrack rangebar');
+        const span2 = el('div', 'rspan');
+        span2.style.left = `${(b.low / max) * 100}%`;
+        span2.style.width = `${Math.max(2, ((b.high - b.low) / max) * 100)}%`;
+        const mid = el('i', 'rmid');
+        mid.style.left = `${(b.median / max) * 100}%`;
+        track.appendChild(span2);
+        track.appendChild(mid);
+        row.appendChild(track);
+        const v = el('span', 'gbval');
+        v.appendChild(el('b', null, moneyShort(b.median)));
+        row.appendChild(v);
+        row.dataset.tip = `${b.role}: ${money(b.low)} – ${money(b.high)}, median ${money(b.median)} across ${b.count} players.`;
+        bars.appendChild(row);
       }
-
-      for (const o of sel.options) {
-        const box = el('div', 'pkg');
-        const t = el('div', 'pkg-head');
-        t.appendChild(el('b', null, o.label));
-        t.appendChild(el('span', 'pkg-wage', `${money(o.weeklyWage)}/wk`));
-        box.appendChild(t);
-        const rows = [
-          ['Term', `${o.years} years`],
-          ['Signing bonus', money(o.signOnBonus)],
-          o.bonusPerEvent ? ['Appearance bonus', `${money(o.bonusPerEvent)} after ${o.bonusEvents} a season`] : null,
-          ['Guaranteed', money(o.guaranteedCost)],
-          o.maximumCost !== o.guaranteedCost ? ['If every bonus triggers', money(o.maximumCost)] : null,
-        ].filter(Boolean);
-        const dl = el('div', 'pkg-rows');
-        for (const [k, v] of rows) {
-          const line = el('div', 'pkg-row');
-          line.appendChild(el('span', null, k));
-          line.appendChild(el('b', null, v ?? '—'));
-          dl.appendChild(line);
-        }
-        box.appendChild(dl);
-        box.appendChild(el('p', 'pkg-why', o.why));
-        box.appendChild(el('p', 'pkg-trade', o.tradeoff));
-        right.appendChild(box);
-      }
-
-      const clause = el('div', `clause ${sel.releaseClause.recommend ? 'yes' : 'no'}`);
-      clause.appendChild(
-        el('b', null, sel.releaseClause.recommend ? `Release clause: ${money(sel.releaseClause.amount)}` : 'No release clause'),
-      );
-      clause.appendChild(el('span', null, sel.releaseClause.why));
-      right.appendChild(clause);
+      panel.appendChild(cardSection('WHAT EACH ROLE BAND PAYS — LOW · MEDIAN · HIGH', bars));
     }
-
-    split.appendChild(left);
-    split.appendChild(right);
-    panel.appendChild(split);
     frag.appendChild(panel);
   }
 
-  const bands = el('div', 'panel');
-  bands.appendChild(el('h2', null, `Wage bill ${money(w.totalBill)} across ${w.squadSize}`));
-  bands.appendChild(
-    table(
-      ['Role band', { label: 'Players', num: true }, { label: 'Median', num: true }, { label: 'Low', num: true }, { label: 'High', num: true }],
-      w.bands.map((b) => [
-        b.role,
-        { text: b.count, num: true },
-        { text: money(b.median), num: true },
-        { text: money(b.low), num: true },
-        { text: money(b.high), num: true },
-      ]),
-    ),
-  );
-  frag.appendChild(bands);
+  // --- the selected player's money page
+  if (state.wageSel && !everyone.some((p) => p.playerId === state.wageSel)) state.wageSel = null;
+  if (state.wageSel) {
+    const p2 = everyone.find((x) => x.playerId === state.wageSel);
+    if (p2) frag.appendChild(playerCard(p2, () => { state.wageSel = null; render(); }, 'financial'));
+  }
 
-  for (const [verdict, title] of [
-    ['under', 'Paid below their peers'],
-    ['over', 'Paid above their peers'],
-  ]) {
-    const rows = w.assessmentList.filter((a) => a.verdict === verdict);
-    if (!rows.length) continue;
+  // --- the board
+  {
     const panel = el('div', 'panel');
-    panel.appendChild(el('h2', null, `${title} — ${rows.length}`));
+    const modes = el('div', 'chiprow');
+    const FILTERS2 = [
+      [`Whole squad ${everyone.length}`, 'all'],
+      [`Due now ${dueNow.length}`, 'now'],
+      [`Due soon ${dueSoon.length}`, 'soon'],
+      [`Overpaid ${overpaid.length}`, 'over'],
+      [`Underpaid ${underpaid.length}`, 'under'],
+    ];
+    for (const [label, mode] of FILTERS2) {
+      const chip = el('button', `chip${(state.wageFilter ?? 'all') === mode ? ' on' : ''}`, label);
+      activatable(chip, () => { state.wageFilter = mode; render(); }, { skipWhen: () => (state.wageFilter ?? 'all') === mode });
+      modes.appendChild(chip);
+    }
+    const mode = state.wageFilter ?? 'all';
+    const listed =
+      mode === 'now' ? dueNow : mode === 'soon' ? dueSoon : mode === 'over' ? overpaid : mode === 'under' ? underpaid : everyone;
+    panel.appendChild(el('h2', null, `📋 Contracts — ${listed.length} of ${everyone.length}`));
+    panel.appendChild(modes);
     panel.appendChild(
-      table(
-        ['Player', { label: 'Wage', num: true }, { label: 'Band median', num: true }, 'Note'],
-        rows.map((a) => [
-          nameOf(a.playerId),
-          { text: money(a.wage), num: true },
-          { text: money(a.peerMedian), num: true },
-          a.note,
-        ]),
-      ),
+      el('p', 'muted tiny', 'Every player with a recorded wage has an offer. Renew when you like — the term shown is the longest the game will take at that age, and the wage is anchored to his own role band. Tap a card for both packages and the clause call.'),
     );
+
+    const grid = el('div', 'wagegrid');
+    const URG = { now: ['Now', 'urgent'], soon: ['Soon', 'action'], later: ['No rush', 'watch'] };
+    for (const p2 of listed) {
+      const r = renewalOf.get(p2.playerId);
+      const a = assessOf.get(p2.playerId);
+      const cardEl = el('div', `wagecard${state.wageSel === p2.playerId ? ' sel' : ''}`);
+
+      const top2 = el('div', 'wtop');
+      top2.appendChild(el('span', 'pos-pill', p2.positionShort ?? '—'));
+      top2.appendChild(el('b', 'wname', p2.name));
+      if (r) {
+        const [lbl, cls] = URG[r.urgency];
+        top2.appendChild(el('span', `act ${cls}`, lbl));
+      }
+      cardEl.appendChild(top2);
+
+      const nums = el('div', 'wnums');
+      const num2 = (lbl, v, cls) => {
+        const c = el('span', `wnum${cls ? ` ${cls}` : ''}`);
+        c.appendChild(el('i', null, lbl));
+        c.appendChild(el('b', null, v));
+        nums.appendChild(c);
+      };
+      num2('Now', money(p2.wage) ?? '—');
+      if (r) num2('Offer', `${money(r.options[0].weeklyWage)}`, 'accent');
+      num2('Term', p2.contractMonths === null ? '—' : fmtTerm(p2.contractMonths));
+      if (r) num2('Up to', `${r.maxYears}y`);
+      cardEl.appendChild(nums);
+
+      // Contract runway: how much of a five-year horizon is left.
+      const months = p2.contractMonths ?? 0;
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill ${months <= 6 ? 't1' : months <= 18 ? 't2' : 't3'}`);
+      fill.style.width = `${Math.max(3, Math.min(100, Math.round((months / 60) * 100)))}%`;
+      track.appendChild(fill);
+      cardEl.appendChild(track);
+
+      if (a) {
+        const v = el('span', `wverdict v-${a.verdict}`);
+        v.textContent = a.verdict === 'in-line' ? 'in line with his band' : a.verdict === 'unknown' ? 'band too thin to compare' : `paid ${a.verdict} the band`;
+        v.dataset.tip = a.note;
+        cardEl.appendChild(v);
+      }
+
+      activatable(cardEl, () => {
+        state.wageSel = state.wageSel === p2.playerId ? null : p2.playerId;
+        render();
+      });
+      grid.appendChild(cardEl);
+    }
+    panel.appendChild(grid);
     frag.appendChild(panel);
   }
   return frag;
@@ -2069,24 +2446,52 @@ function renderLoans(doc) {
 
   if (L.candidates.length) {
     const panel = el('div', 'panel');
-    panel.appendChild(el('h2', null, `Should go out — ${L.candidates.length}`));
+    panel.appendChild(el('h2', null, `🚏 Should go out — ${L.candidates.length}`));
     panel.appendChild(
-      table(
-        ['Player', 'Why', 'Best-fit clubs'],
-        L.candidates.map((c) => [
-          nameOf(c.playerId),
-          { text: c.reason, cls: 'wrap' },
-          {
-            text: c.destinations.slice(0, 2).map((d) => d.teamName).join(' · ') || 'no club in range',
-            cls: 'wrap',
-            title: c.destinations.length
-              ? c.destinations.map((d) => `${d.teamName} (${d.leagueName ?? '?'}, OVR ${d.clubOverall}) — ${d.read}`).join('\n')
-              : 'Nobody rated right in a signable league — the answer may simply be minutes here.',
-          },
-        ]),
-      ),
+      el('p', 'muted tiny', 'Players the rules say need football elsewhere, each with the clubs where their level makes them a starter. When a real approach arrives, score it below rather than guessing from this list.'),
     );
-    panel.appendChild(el('p', 'muted tiny', 'One row each — hover the clubs for the full read. When an actual approach arrives, score it below instead of guessing.'));
+    const grid = el('div', 'loangrid');
+    for (const c of L.candidates) {
+      const p2 = byId.get(c.playerId);
+      const box = el('div', 'loancard');
+      const top = el('div', 'loantop');
+      if (p2) top.appendChild(el('span', 'pos-pill', p2.positionShort ?? '—'));
+      top.appendChild(el('b', 'loanname', nameOf(c.playerId)));
+      if (p2) top.appendChild(el('span', 'loanage', p2.age !== null ? `${p2.age}y` : ''));
+      box.appendChild(top);
+
+      if (p2) {
+        const nums = el('div', 'loannums');
+        const add = (lbl, v, cls) => {
+          const cell = el('span', `loannum${cls ? ` ${cls}` : ''}`);
+          cell.appendChild(el('i', null, lbl));
+          cell.appendChild(el('b', null, String(v)));
+          nums.appendChild(cell);
+        };
+        add('Now', p2.overall ?? '—');
+        add('Ceiling', p2.potential ?? '—', 'accent');
+        add('Minutes', `${p2.minutesThisSeason ?? 0}'`, (p2.minutesThisSeason ?? 0) < 300 ? 'warn' : '');
+        box.appendChild(nums);
+      }
+
+      box.appendChild(el('p', 'loanwhy', c.reason));
+      if (c.destinations.length) {
+        const chips = el('div', 'chipwrap');
+        for (const d of c.destinations.slice(0, 4)) {
+          const chip = el('span', 'destchip');
+          chip.appendChild(el('b', null, d.teamName));
+          chip.appendChild(el('i', null, String(d.clubOverall)));
+          chip.dataset.tip = `${d.leagueName ?? 'Unknown league'} · club rated ${d.clubOverall} — ${d.read}`;
+          chips.appendChild(chip);
+        }
+        box.appendChild(cardSection('WHERE HE WOULD START', chips));
+      } else {
+        box.appendChild(el('p', 'muted tiny', 'No club in range — the answer may simply be minutes here.'));
+      }
+      for (const g of c.dealGuide ?? []) box.appendChild(el('p', 'muted tiny', `· ${g}`));
+      grid.appendChild(box);
+    }
+    panel.appendChild(grid);
     frag.appendChild(panel);
   }
 
@@ -2217,8 +2622,8 @@ function renderScouting(doc) {
         doc.scouts.map((sc) => [
           sc.name,
           `${flagFor(sc.nationality)}${sc.nationality ?? '—'}`,
-          { text: '★'.repeat(sc.knowledge ?? 0) || '—', cls: `stars m${Math.min(5, Math.max(1, sc.knowledge ?? 1))}` },
-          { text: '★'.repeat(sc.experience ?? 0) || '—', cls: `stars m${Math.min(5, Math.max(1, sc.experience ?? 1))}` },
+          { node: starsOf(sc.knowledge), text: sc.knowledge ?? '', sort: sc.knowledge ?? 0, cls: `stars m${Math.min(5, Math.max(1, sc.knowledge ?? 1))}` },
+          { node: starsOf(sc.experience), text: sc.experience ?? '', sort: sc.experience ?? 0, cls: `stars m${Math.min(5, Math.max(1, sc.experience ?? 1))}` },
           sc.mission ? `${sc.mission.positions.join(' / ') || '?'} in ${flagFor(sc.mission.nation)}${sc.mission.nation ?? '?'}` : 'idle',
           sc.mission?.returns ?? '—',
           { text: sc.mission?.cost ?? '—', num: true },
@@ -2256,7 +2661,7 @@ function renderScouting(doc) {
     notes.appendChild(el('h2', null, `📬 Report prospects — ${reports.length}`));
     if (reports.length) {
       notes.appendChild(
-        el('p', 'muted', 'Prospects the scouts have brought back but you have not signed: the save writes them to disk on report day, before any signing. Each carries a verdict weighed against the academy you already have and the positions that are thin.'),
+        el('p', 'muted', 'Prospects a scout has delivered into your academy but you have not signed: the report puts them in the squad list, and signing is what writes the contract. Each carries a verdict weighed against the academy you already have and the positions that are thin.'),
       );
       notes.appendChild(
         table(
@@ -2276,8 +2681,19 @@ function renderScouting(doc) {
       );
       notes.appendChild(el('p', 'muted tiny', 'Sign or release them in game; this list follows the save. Signed prospects move to My Academy with tier and months tracked.'));
     } else {
+      const away = (doc.scouts ?? []).filter((sc) => sc.away);
+      const when = away
+        .map((sc) => sc.mission?.returns)
+        .filter(Boolean)
+        .sort()[0];
       notes.appendChild(
-        el('p', 'muted tiny', 'No unsigned reports in the save right now. When a scout trip lands, the prospects appear here — with a sign-or-pass verdict weighed against your academy — before you have touched anything in game.'),
+        el(
+          'p',
+          'muted',
+          away.length
+            ? `Nothing to sign: ${away.length === (doc.scouts ?? []).length ? 'every scout is' : `${away.length} of your ${(doc.scouts ?? []).length} scouts are`} still out on a trip${when ? `, the first back ${when}` : ''}. When a report lands, the prospect appears in your academy unsigned — and here, with a verdict.`
+            : 'No unsigned reports right now. When a scout delivers, the prospect appears in your academy unsigned — and here, with a sign-or-pass verdict weighed against the academy you already have.',
+        ),
       );
     }
     frag.appendChild(notes);
@@ -2458,26 +2874,24 @@ function renderSquadHub(doc) {
 
   const mode = state.hubMode ?? 'basic';
   if (mode === 'basic') {
-    frag.appendChild(renderPlayers(doc.senior));
+    frag.appendChild(renderPlayers(doc.senior, { title: '👥 Squad' }));
     return frag;
   }
 
   const list = applyFilters(doc.senior);
   // A selected row opens the card above the table, dressed for this view:
   // Stats shows the match log, Attributes the full sheet, Financial the money.
-  const selected = list.find((p2) => p2.playerId === state.hubSel) ?? null;
-  if (selected) {
-    frag.appendChild(
-      playerCard(selected, () => {
-        state.hubSel = null;
-        render();
-      }, mode),
-    );
-  }
+  if (state.hubSel && !list.some((p2) => p2.playerId === state.hubSel)) state.hubSel = null;
   const rowOpts = {
     keys: list.map((p2) => p2.playerId),
+    openKey: state.hubSel,
+    detail: (key) => {
+      const sel = list.find((p2) => p2.playerId === Number(key));
+      return sel ? playerCard(sel, () => { state.hubSel = null; render(); }, mode) : null;
+    },
     onRow: (key) => {
-      state.hubSel = Number(key);
+      const id = Number(key);
+      state.hubSel = state.hubSel === id ? null : id;
       render();
     },
   };
@@ -2486,11 +2900,10 @@ function renderSquadHub(doc) {
     panel.appendChild(el('h2', null, '📊 Season numbers'));
     panel.appendChild(
       table(
-        ['Player', { label: 'Pos', pos: true }, { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Apps', num: true }, { label: 'Goals', num: true }, { label: 'Rating', num: true }, { label: 'Minutes', num: true }, 'Form'],
+        [{ label: 'Pos', pos: true }, 'Player', { label: 'OVR', num: true }, { label: 'Apps', num: true }, { label: 'Goals', num: true }, { label: 'Rating', num: true }, { label: 'Mins', num: true }, 'Form'],
         list.map((p) => [
-          p.name,
           { text: p.positionShort ?? '—', cls: 'posbadge' },
-          { text: p.age ?? '—', num: true },
+          { node: playerNameCell(p), text: p.name, sort: p.name },
           { text: p.overall ?? '—', num: true, tier: p.overall },
           { text: p.appearances ?? '—', num: true },
           { text: p.goals ?? '—', num: true },
@@ -2501,17 +2914,17 @@ function renderSquadHub(doc) {
         rowOpts,
       ),
     );
-    panel.appendChild(el('p', 'muted tiny', 'Tap a row for the card with his match log.'));
+    panel.appendChild(el('p', 'muted tiny', 'Rest on the dot at the row start, or tap anywhere, for his match log.'));
   } else if (mode === 'attributes') {
     const sample = list.find((p) => p.positionShort !== 'GK') ?? list[0];
     const groups = sample?.groups?.map((g) => g.name) ?? [];
     panel.appendChild(el('h2', null, '🧬 Attribute groups'));
     panel.appendChild(
       table(
-        ['Player', { label: 'Pos', pos: true }, { label: 'OVR', num: true }, ...groups.map((g) => ({ label: g, num: true }))],
+        [{ label: 'Pos', pos: true }, 'Player', { label: 'OVR', num: true }, ...groups.map((g) => ({ label: g, num: true }))],
         list.map((p) => [
-          p.name,
           { text: p.positionShort ?? '—', cls: 'posbadge' },
+          { node: playerNameCell(p), text: p.name, sort: p.name },
           { text: p.overall ?? '—', num: true, tier: p.overall },
           ...groups.map((g) => {
             const grp = p.groups.find((x) => x.name === g);
@@ -2521,18 +2934,18 @@ function renderSquadHub(doc) {
         rowOpts,
       ),
     );
-    panel.appendChild(el('p', 'muted tiny', 'Group means; tap a row for the card with the full attribute sheet. A keeper\u2019s groups differ from an outfielder\u2019s, so his columns read — here.'));
+    panel.appendChild(el('p', 'muted tiny', 'Group means; open a row for the full attribute sheet. A keeper\u2019s groups differ from an outfielder\u2019s, so his columns read — here.'));
   } else {
     const valueOf = new Map((doc.sellValues?.rows ?? []).map((r) => [r.playerId, r]));
     panel.appendChild(el('h2', null, '💷 Money'));
     panel.appendChild(
       table(
-        ['Player', { label: 'Pos', pos: true }, { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Wage', num: true }, 'Contract', 'Wage check', { label: 'EA value ~', num: true }, { label: 'World pays', num: true }],
+        [{ label: 'Pos', pos: true }, 'Player', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'Wage', num: true }, 'Contract', 'Wage check', { label: 'EA value ~', num: true }, { label: 'World pays', num: true }],
         list.map((p) => {
           const v = valueOf.get(p.playerId);
           return [
-            p.name,
             { text: p.positionShort ?? '—', cls: 'posbadge' },
+            { node: playerNameCell(p), text: p.name, sort: p.name },
             { text: p.age ?? '—', num: true },
             { text: p.overall ?? '—', num: true, tier: p.overall },
             { text: money(p.wage) ?? '—', num: true },
@@ -2553,7 +2966,7 @@ function renderSquadHub(doc) {
         rowOpts,
       ),
     );
-    panel.appendChild(el('p', 'muted tiny', 'Tap a row for the card with the full money read.'));
+    panel.appendChild(el('p', 'muted tiny', 'Open a row for the full money read: the band, the spread and the deal on the table.'));
   }
   frag.appendChild(panel);
   return frag;
@@ -2625,22 +3038,25 @@ function renderSellValues(doc) {
         'when an in-game screen disagrees, tell Companion and the curves get recalibrated.',
     ),
   );
+  if (state.sellSel && !sv.rows.some((r) => r.playerId === state.sellSel)) state.sellSel = null;
+  if (state.sellSel) {
+    const p2 = doc.senior.find((x) => x.playerId === state.sellSel);
+    if (p2) frag.appendChild(playerCard(p2, () => { state.sellSel = null; render(); }, 'financial'));
+  }
   panel.appendChild(
     table(
-      ['Player', { label: 'Pos', pos: true }, { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Wage', num: true }, 'Contract', { label: 'Floor', num: true }, { label: 'EA value ~', num: true }, { label: 'Ceiling', num: true }, { label: 'World pays', num: true }],
+      [{ label: 'Pos', pos: true }, 'Player', { label: 'Age', num: true }, { label: 'OVR', num: true }, { label: 'POT', num: true }, { label: 'Wage', num: true }, 'Contract', { label: 'Valuation ~', num: true }, { label: 'World pays', num: true }],
       sv.rows.map((r) => {
         const p2 = window.__doc?.senior?.find((x) => x.playerId === r.playerId);
         return [
-          r.name,
           { text: p2?.positionShort ?? '—', cls: 'posbadge' },
+          { node: p2 ? playerNameCell(p2) : undefined, text: r.name, sort: r.name },
           { text: r.age ?? '—', num: true },
           { text: r.overall ?? '—', num: true, tier: r.overall },
           { text: r.potential ?? '—', num: true, tier: r.potential },
-          { text: money(r.wage) ?? '—', num: true },
-          r.contractMonths !== null ? fmtTerm(r.contractMonths) : '—',
-          { text: r.ea ? moneyShort(r.ea.floor) : '—', num: true },
-          { text: r.ea ? moneyShort(r.ea.value) : '—', num: true, tier: r.ea && r.ea.value >= 50_000_000 ? 90 : r.ea && r.ea.value >= 20_000_000 ? 85 : undefined },
-          { text: r.ea ? moneyShort(r.ea.ceiling) : '—', num: true },
+          { node: moneyCell(r.wage, 'wk'), text: r.wage ?? '', num: true, sort: r.wage ?? 0 },
+          { node: contractCell(r.contractMonths), text: r.contractMonths ?? '', sort: r.contractMonths ?? 0 },
+          { node: valuationCell(r.ea), text: r.ea?.value ?? '', num: true, sort: r.ea?.value ?? 0 },
           {
             text: r.mid !== null ? `${moneyShort(r.low)}–${moneyShort(r.high)}` : r.offMarket ? 'beyond it' : '—',
             num: true,
@@ -2652,8 +3068,16 @@ function renderSellValues(doc) {
           },
         ];
       }),
+      {
+        keys: sv.rows.map((r) => r.playerId),
+        onRow: (key) => {
+          state.sellSel = Number(key);
+          render();
+        },
+      },
     ),
   );
+  panel.appendChild(el('p', 'muted tiny', 'Tap a row for his money card: wage against the band, the valuation spread, and the renewal on the table.'));
   frag.appendChild(panel);
   return frag;
 }
@@ -2671,7 +3095,7 @@ function renderCoach(doc) {
         c.targets.map((m) => [
           m.name,
           m.club ?? '—',
-          { text: '★'.repeat(Math.round(m.stars ?? 0)), cls: `stars m${Math.min(5, Math.max(1, Math.round(m.stars ?? 1)))}`, title: `${m.stars} stars — the game's own rating` },
+          { node: starsOf(m.stars), text: m.stars ?? '', sort: m.stars ?? 0, cls: `stars m${Math.min(5, Math.max(1, Math.round(m.stars ?? 1)))}`, title: `${m.stars} stars — the game's own rating` },
           { text: m.age ?? '—', num: true },
         ]),
       ),
@@ -2691,6 +3115,51 @@ function renderCoach(doc) {
 /** Board expectations: confidence, objectives, competition outcomes. */
 function renderBoard(doc) {
   const frag = document.createDocumentFragment();
+  const seasons = doc.seasons ?? [];
+  const cur = seasons[seasons.length - 1] ?? null;
+  const comps = (doc.board?.competitions ?? []).filter((c) => c.season === doc.season);
+  const wonAll = (doc.board?.competitions ?? []).filter((c) => c.won).length;
+
+  {
+    const hero = el('div', 'panel');
+    hero.appendChild(el('h2', null, '🏛 Where you stand'));
+    hero.appendChild(
+      tileRow([
+        ['Season', doc.season],
+        ['League position', cur?.position && cur.position > 0 ? ordinal(cur.position) : 'in progress'],
+        ['Points', cur?.points ?? null],
+        ['Trophies won', wonAll || null],
+        ['Live competitions', comps.filter((c) => !c.notStarted && !c.won).length || null],
+        ['Your wage', money(doc.board.wage)],
+        ['Career earnings', money(doc.board.totalEarnings)],
+      ]),
+    );
+    hero.appendChild(
+      el('p', 'muted tiny', 'The board\u2019s own confidence number reads zero in every observed save, so it is not shown — these are the facts the save does keep.'),
+    );
+    frag.appendChild(hero);
+  }
+
+  if (comps.length) {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, '🏆 This season\u2019s competitions'));
+    const grid = el('div', 'compgrid');
+    for (const c of comps) {
+      const state2 = c.won ? 'won' : c.notStarted ? 'idle' : c.result === 1 ? 'met' : 'live';
+      const box = el('div', `compcard ${state2}`);
+      box.appendChild(el('b', 'compname', c.name));
+      const pill = el('span', `comppill ${state2}`);
+      pill.textContent = c.won ? '🏆 Won' : c.notStarted ? 'Not started' : c.result === 1 ? 'Objective met' : 'In progress';
+      box.appendChild(pill);
+      grid.appendChild(box);
+    }
+    panel.appendChild(grid);
+    panel.appendChild(
+      el('p', 'muted tiny', 'Cup brackets and group tables are not written to the save (verified) — progress and outcome are.'),
+    );
+    frag.appendChild(panel);
+  }
+
   const board = el('div', 'panel');
   board.appendChild(el('h2', null, '🏛 Board'));
   board.appendChild(
@@ -2758,8 +3227,56 @@ function renderBoard(doc) {
 /** The manager's own office: career record, pay, the record book. */
 function renderManagerOffice(doc) {
   const frag = document.createDocumentFragment();
+  const seasons = doc.seasons ?? [];
 
-  // Season story first: the manager's actual record, straight from the save.
+  // The career as a timeline: one column per season, height by points, with
+  // the finish and the silverware attached. A record you can see the shape of.
+  if (seasons.length) {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, '🗓 The career so far'));
+    const maxPts = Math.max(1, ...seasons.map((x) => x.points ?? 0));
+    const chart = el('div', 'timeline');
+    for (const sn of seasons) {
+      const col = el('div', 'tlcol');
+      const bar = el('div', 'tlbar');
+      const fill = el('div', `tlfill${sn.position === 1 ? ' champ' : ''}`);
+      fill.style.height = `${Math.max(6, Math.round(((sn.points ?? 0) / maxPts) * 100))}%`;
+      bar.appendChild(fill);
+      const trophies = sn.leagueTrophies + sn.cupTrophies;
+      if (trophies) {
+        const mark = el('span', 'tltrophy', '🏆'.repeat(Math.min(3, trophies)));
+        col.appendChild(mark);
+      }
+      col.appendChild(bar);
+      col.appendChild(el('b', 'tlpts', String(sn.points ?? '—')));
+      col.appendChild(el('span', 'tlpos', sn.position && sn.position > 0 ? ordinal(sn.position) : 'live'));
+      col.appendChild(el('i', 'tlseason', `S${sn.season}`));
+      col.dataset.tip =
+        `Season ${sn.season}: ${sn.wins}W ${sn.draws}D ${sn.losses}L · ${sn.points ?? '—'} points · ` +
+        `${sn.goalsFor}:${sn.goalsAgainst}${sn.position && sn.position > 0 ? ` · finished ${ordinal(sn.position)}` : ''}` +
+        `${trophies ? ` · ${trophies} trophy${trophies > 1 ? 'ies' : ''}` : ''}`;
+      chart.appendChild(col);
+    }
+    panel.appendChild(chart);
+    const totals = seasons.reduce(
+      (a, x) => ({ w: a.w + x.wins, d: a.d + x.draws, l: a.l + x.losses, gf: a.gf + (x.goalsFor ?? 0), ga: a.ga + (x.goalsAgainst ?? 0) }),
+      { w: 0, d: 0, l: 0, gf: 0, ga: 0 },
+    );
+    const played = totals.w + totals.d + totals.l;
+    panel.appendChild(
+      tileRow([
+        ['Seasons', seasons.length],
+        ['Played', played || null],
+        ['Win rate', played ? `${Math.round((totals.w / played) * 100)}%` : null],
+        ['Record', played ? `${totals.w}-${totals.d}-${totals.l}` : null],
+        ['Goals', played ? `${totals.gf}:${totals.ga}` : null],
+        ['Trophies', seasons.reduce((a, x) => a + x.leagueTrophies + x.cupTrophies, 0) || null],
+      ]),
+    );
+    frag.appendChild(panel);
+  }
+
+  // Season story: the manager's actual record, straight from the save.
   if (doc.seasons.length) {
     const panel = el('div', 'panel');
     panel.appendChild(el('h2', null, '📜 Season record'));
@@ -2843,7 +3360,9 @@ function renderManagerMarket(doc) {
 
   const rows = all.filter((m) => m.game === game).slice(0, 80);
   const starCell = (v) => ({
-    text: v === null ? '—' : '★'.repeat(Math.floor(v)) + (v % 1 ? '½' : ''),
+    node: starsOf(v),
+    text: v ?? '',
+    sort: v ?? 0,
     cls: `stars m${Math.min(5, Math.max(1, Math.round(v ?? 1)))}`,
     title: v === null ? undefined : `${v} stars — the game's own rating, decoded from the save`,
   });
@@ -3534,93 +4053,6 @@ function renderStory(doc) {
   cap.appendChild(el('p', 'muted tiny', 'What “Copy caption” puts on your clipboard — paste it next to the image.'));
   side.appendChild(cap);
 
-  if (settings.rpg) {
-    const rpg = el('div', 'panel');
-    rpg.appendChild(el('h2', null, `🎲 ${CAMPAIGNS[campaign.type].name}`));
-    rpg.appendChild(el('p', 'muted tiny', `Season ${doc.season} of a 15-season career · ${CAMPAIGNS[campaign.type].blurb}`));
-
-    const { phase, missions, micro } = campaignMissions(doc);
-    rpg.appendChild(el('p', 'phasebanner', phase.label));
-    for (const c of missions) {
-      const row = el('div', 'quest');
-      const head2 = el('div', 'qhead');
-      head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
-      head2.appendChild(el('span', 'muted tiny', c.line));
-      row.appendChild(head2);
-      const track = el('div', 'btrack');
-      const fill = el('div', `bfill${c.done ? ' done' : ''}`);
-      fill.style.width = `${c.pct}%`;
-      track.appendChild(fill);
-      row.appendChild(track);
-      rpg.appendChild(row);
-    }
-    if (micro.length) {
-      rpg.appendChild(el('span', 'lbl-row', 'MICRO'));
-      for (const c of micro) {
-        const row = el('div', 'quest micro');
-        const head2 = el('div', 'qhead');
-        head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
-        head2.appendChild(el('span', 'muted tiny', c.line));
-        row.appendChild(head2);
-        const track = el('div', 'btrack');
-        const fill = el('div', `bfill${c.done ? ' done' : ''}`);
-        fill.style.width = `${Math.max(0, Math.min(100, c.pct))}%`;
-        track.appendChild(fill);
-        row.appendChild(track);
-        rpg.appendChild(row);
-      }
-    }
-    if (missions.length) rpg.appendChild(el('p', 'muted tiny', 'Phase missions re-cut with the season — windows, the grind, the run-in — micro missions with every save. The campaign is chosen in Settings.'));
-
-    const ladder = campaignLadder(doc, campaign.type);
-    if (ladder) {
-      let nextNamed = false;
-      for (const m of ladder) {
-        const row = el('div', `mile${m.done ? ' done' : ''}`);
-        let mark = m.done ? '✓' : '·';
-        if (!m.done && !nextNamed) { mark = '▸'; nextNamed = true; row.classList.add('next'); }
-        row.appendChild(el('i', 'mk2', mark));
-        row.appendChild(el('b', null, m.name));
-        if (m.detail) row.appendChild(el('span', 'muted tiny', m.detail));
-        rpg.appendChild(row);
-      }
-      const next = ladder.find((m) => !m.done);
-      rpg.appendChild(
-        el('p', 'tipline', next ? `The arc points at: ${next.name.toLowerCase()}.` : 'The ladder is complete. Write your own ending.'),
-      );
-    } else {
-      // custom: pick levers from the live pool
-      rpg.appendChild(el('p', 'muted tiny', 'Pick your levers — each is a live condition computed from the save.'));
-      const pool = rpgChallenges(doc);
-      const lchips = el('div', 'chiprow');
-      for (const c of pool) {
-        const on = campaign.levers.includes(c.name);
-        const chip = el('button', `chip${on ? ' on' : ''}`, c.name);
-        activatable(chip, () => {
-          campaign.levers = on ? campaign.levers.filter((n2) => n2 !== c.name) : [...campaign.levers, c.name];
-          saveCampaign();
-          render();
-        });
-        lchips.appendChild(chip);
-      }
-      rpg.appendChild(lchips);
-      for (const c of pool.filter((c2) => campaign.levers.includes(c2.name))) {
-        const row = el('div', 'quest');
-        const head2 = el('div', 'qhead');
-        head2.appendChild(el('b', null, `${c.done ? '✓ ' : ''}${c.name}`));
-        head2.appendChild(el('span', 'muted tiny', c.line));
-        row.appendChild(head2);
-        const track = el('div', 'btrack');
-        const fill = el('div', `bfill${c.done ? ' done' : ''}`);
-        fill.style.width = `${c.pct}%`;
-        track.appendChild(fill);
-        row.appendChild(track);
-        rpg.appendChild(row);
-      }
-    }
-    side.appendChild(rpg);
-  }
-
   if (settings.ai) {
     const ai = el('div', 'panel');
     ai.appendChild(el('h2', null, '✨ AI mode'));
@@ -3704,7 +4136,11 @@ function renderCentral(doc) {
       bar.appendChild(day);
       bar.appendChild(el('span', 'dateyear', String(Math.floor(doc.gameDate / 10000))));
       for (const w of doc.calendar?.windows ?? []) {
-        bar.appendChild(el('span', `chip winchip${w.openNow ? ' on' : ''}`, `${w.label} ${w.opens} → ${w.closes}${w.openNow ? ' · OPEN' : ''}`));
+        const pill = el('span', `wchip${w.openNow ? ' open' : ''}`);
+        pill.appendChild(el('i', 'dot'));
+        pill.append(`${w.label} ${w.opens} → ${w.closes}`);
+        if (w.openNow) pill.appendChild(el('b', null, 'OPEN'));
+        bar.appendChild(pill);
       }
       box.appendChild(bar);
     }
@@ -3740,13 +4176,39 @@ function renderCentral(doc) {
     const lt = doc.leagueTable;
     const v = (x) => ({ text: lt.started ? x : '—', num: true });
     const box = el('div');
+    // The movement column is the insight the raw table hides: who is climbing
+    // and who is falling relative to where they finished last season.
     box.appendChild(
       table(
-        [{ label: '#', num: true }, 'Club', { label: 'P', num: true }, { label: 'W', num: true }, { label: 'D', num: true }, { label: 'L', num: true }, { label: 'GF', num: true }, { label: 'GA', num: true }, { label: 'GD', num: true }, { label: 'Pts', num: true }],
+        [
+          { label: '#', num: true, always: true },
+          { label: '', always: true },
+          { label: 'Club', always: true },
+          { label: 'P', num: true, always: true },
+          { label: 'W', num: true, always: true },
+          { label: 'D', num: true, always: true },
+          { label: 'L', num: true, always: true },
+          { label: 'GF', num: true, always: true },
+          { label: 'GA', num: true, always: true },
+          { label: 'GD', num: true, always: true },
+          { label: 'Pts', num: true, always: true },
+        ],
         lt.rows.map((r, i) => {
           const you = r.isUser ? 'you' : '';
+          const rank = i + 1;
+          const move = r.prevPosition !== null && r.prevPosition > 0 ? r.prevPosition - rank : null;
+          const moveCell =
+            move === null
+              ? { text: '', cls: you || undefined }
+              : {
+                  text: move > 0 ? `▲${move}` : move < 0 ? `▼${-move}` : '—',
+                  cls: `${move > 0 ? 'mv-up' : move < 0 ? 'mv-down' : 'mv-flat'}${you ? ' you' : ''}`,
+                  sort: String(move),
+                  title: `Finished ${ordinal(r.prevPosition)} last season`,
+                };
           return [
-            { text: i + 1, num: true, cls: you || undefined, title: r.position !== null && r.position !== i + 1 ? `The save stores position ${r.position}` : undefined },
+            { text: rank, num: true, cls: you || undefined },
+            moveCell,
             { text: `${r.name}${r.champion ? ' 👑' : ''}`, cls: you || undefined, title: r.champion ? 'Reigning champions' : undefined },
             { ...v(r.played), cls: you || undefined },
             { ...v(r.wins), cls: you || undefined },
@@ -3761,7 +4223,11 @@ function renderCentral(doc) {
         { tight: true },
       ),
     );
-    if (!lt.started) box.appendChild(el('p', 'muted tiny', 'No league match recorded yet this season — the order carries over from the save and the numbers fill in match by match.'));
+    box.appendChild(
+      el('p', 'muted tiny', lt.started
+        ? 'Arrows compare today\u2019s order with where each club finished last season.'
+        : 'No league match recorded yet this season — the order carries over from the save, the arrows show last season\u2019s finish, and the numbers fill in match by match.'),
+    );
     panel(colMain, `🏟 ${lt.league ?? 'League table'}`, box);
   }
 
@@ -3795,7 +4261,7 @@ function renderCentral(doc) {
     const box = el('div');
     for (const a of doc.alerts.slice(0, 5)) todoRow(box, a.tag, a.playerName, a.line);
     if (doc.alerts.length > 5) box.appendChild(el('p', 'muted tiny', `+${doc.alerts.length - 5} more in the rail.`));
-    if (!doc.alerts.length) box.appendChild(el('p', 'muted tiny', 'Nothing needs you. Enjoy it.'));
+    if (!doc.alerts.length) box.appendChild(el('p', 'muted tiny', 'Nothing outstanding.'));
     panel(colSide, `🔔 Decisions — ${doc.alerts.length}`, box);
   }
 
@@ -3808,7 +4274,7 @@ function renderCentral(doc) {
     for (const r of t2.suspended) {
       todoRow(box, '🟥 Suspended', `${r.name}${r.pos ? ` · ${r.pos}` : ''}`, r.replacement ? `step in: ${r.replacement.name} (fit ${r.replacement.fit})` : '');
     }
-    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'Everyone fit, nobody banned. The physio room is empty.'));
+    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'No injuries, no suspensions.'));
     panel(colSide, '🏥 Treatment room', box);
   }
 
@@ -3824,7 +4290,7 @@ function renderCentral(doc) {
       const t2 = TREND[p2.trend];
       todoRow(box, `${t2.glyph} ${p2.overallSeasonDelta > 0 ? '+' : ''}${p2.overallSeasonDelta}`, p2.name, `${p2.positionShort ?? ''} · ${p2.overall}${p2.potential && p2.potential !== p2.overall ? ` → ${p2.potential}` : ''}`);
     }
-    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'No movement yet this season.'));
+    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'No rating movement yet.'));
     panel(colSide, '📊 Movers', box);
   }
 
@@ -3838,7 +4304,7 @@ function renderCentral(doc) {
     for (const r of (doc.loans.out ?? []).slice(0, 2)) {
       todoRow(box, 'On loan', r.name, `Δ OVR ${r.overallDelta === null || r.overallDelta === undefined ? '—' : (r.overallDelta > 0 ? '+' : '') + r.overallDelta} at ${r.atTeamName ?? '?'}`);
     }
-    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'Quiet on every front.'));
+    if (!box.childElementCount) box.appendChild(el('p', 'muted tiny', 'Nothing to report.'));
     panel(colSide, '🩺 Pulse', box);
   }
 
@@ -3891,7 +4357,7 @@ function renderCentral(doc) {
         box.appendChild(row);
       }
     }
-    box.appendChild(go('story'));
+    box.appendChild(go('story', 'campaign'));
     panel(colSide, '🎲 Campaign', box);
   }
 
@@ -3903,51 +4369,107 @@ function renderCentral(doc) {
  * §10) — this is the board you SET plans from: who has growth left, where each
  * player's growth buys the most, and whether the minutes are arriving.
  */
+/**
+ * The development board. The save holds no development-plan data (verified) —
+ * this is the board you SET plans from: who has growth left, where each
+ * player's growth buys the most, and whether the minutes are arriving.
+ */
 function renderDevelop(doc) {
   const frag = document.createDocumentFragment();
-  const panel = el('div', 'panel');
-  panel.appendChild(el('h2', null, '🌱 Development board'));
-  panel.appendChild(
-    el('p', 'muted', 'Everyone with real growth left. Focus = the attributes where growth buys the most fit, from the fitted position weights and this world\u2019s percentiles — point the game\u2019s development plans there. The save does not expose the plans themselves.'),
-  );
   const everyone = [...doc.senior, ...doc.academy].sort((a, b) => (b.headroom ?? 0) - (a.headroom ?? 0));
   const growers = everyone.filter((p2) => (p2.headroom ?? 0) >= 2);
+  const starved = growers.filter((p2) => (p2.minutesThisSeason ?? 0) < 300 && (p2.age ?? 99) <= 23);
+
+  const head = el('div', 'panel');
+  head.appendChild(el('h2', null, '🌱 Development board'));
+  head.appendChild(
+    tileRow([
+      ['Still growing', growers.length, 'Players with two or more points of ceiling left.'],
+      ['Growth banked', everyone.reduce((a, x) => a + Math.max(0, x.overallSeasonDelta ?? 0), 0), 'Total overall points gained across the squad this season.'],
+      ['Starved', starved.length, 'Under 23, growth left, and under 300 minutes — the ones a season is being wasted on.', starved.length ? 'warn' : ''],
+      ['Mean ceiling', doc.stats.meanPotential ?? '—'],
+    ]),
+  );
+  head.appendChild(
+    el('p', 'muted tiny', 'Focus = the attributes where growth buys the most fit, from the fitted position weights and this world\u2019s percentiles. Point the game\u2019s development plans there; the save does not expose the plans themselves.'),
+  );
   const modes2 = el('div', 'chiprow');
-  for (const [label, mode] of [[`Growth left ${growers.length}`, 'grow'], [`Everyone ${everyone.length}`, 'all']]) {
+  for (const [label, mode] of [[`Growth left ${growers.length}`, 'grow'], [`Everyone ${everyone.length}`, 'all'], [`Needs minutes ${starved.length}`, 'starved']]) {
     const chip = el('button', `chip${(state.devFilter ?? 'grow') === mode ? ' on' : ''}`, label);
     activatable(chip, () => { state.devFilter = mode; render(); }, { skipWhen: () => (state.devFilter ?? 'grow') === mode });
     modes2.appendChild(chip);
   }
-  panel.appendChild(modes2);
-  const pool = state.devFilter === 'all' ? everyone : growers;
-  panel.appendChild(
-    table(
-      [{ label: 'Pos', pos: true }, 'Player', { label: 'Age', num: true }, { label: 'Now', num: true }, { label: 'Ceiling', num: true }, { label: 'Left', num: true }, 'Trend', { label: 'Mins', num: true }, 'Focus'],
-      pool.map((p2) => {
-        const t2 = p2.trend ? TREND[p2.trend] : null;
-        return [
-          { text: p2.positionShort ?? '—', cls: 'posbadge' },
-          p2.name,
-          { text: p2.age ?? '—', num: true },
-          { text: p2.overall ?? '—', num: true, tier: p2.overall },
-          { text: p2.potential ?? '—', num: true, tier: p2.potential },
-          { text: p2.headroom ?? '—', num: true },
-          t2 ? `${t2.glyph} ${p2.overallSeasonDelta > 0 ? '+' : ''}${p2.overallSeasonDelta}` : '—',
-          { text: p2.minutesThisSeason ?? 0, num: true, title: (p2.minutesThisSeason ?? 0) < 300 ? 'Under 300 minutes — growth stalls without games' : undefined },
-          {
-            text: p2.developFocus?.length
-              ? p2.developFocus.map((d) => `${prettyAttr(d.attr)} ${d.value}`).join(' · ')
-              : 'balanced — minutes are the lever',
-            cls: 'wrap',
-            title: p2.developFocus?.length
-              ? p2.developFocus.map((d) => `${prettyAttr(d.attr)}: ${d.percentile}th percentile for the position`).join('\n')
-              : undefined,
-          },
-        ];
-      }),
-    ),
-  );
-  frag.appendChild(panel);
+  head.appendChild(modes2);
+  frag.appendChild(head);
+
+  const pool = state.devFilter === 'all' ? everyone : state.devFilter === 'starved' ? starved : growers;
+  if (!pool.length) {
+    frag.appendChild(el('p', 'empty', 'Nobody here.'));
+    return frag;
+  }
+
+  const grid = el('div', 'devgrid');
+  for (const p2 of pool) {
+    const cardEl = el('div', 'devcard');
+    const top = el('div', 'devtop');
+    top.appendChild(el('span', 'pos-pill', p2.positionShort ?? '—'));
+    top.appendChild(el('b', 'devname', p2.name));
+    top.appendChild(el('span', 'devage', p2.age !== null ? `${p2.age}y` : ''));
+    const arrow = trendArrow(p2);
+    if (arrow) top.appendChild(arrow);
+    cardEl.appendChild(top);
+
+    // The growth runway: how far he has come and how far is left.
+    const span = el('div', 'runway');
+    const from = p2.overall ?? 0;
+    const to = p2.potential ?? from;
+    const pct = to > 0 ? Math.round((from / to) * 100) : 0;
+    const track = el('div', 'btrack');
+    const fill = el('div', `bfill ${tier(p2.overall)}`);
+    fill.style.width = `${pct}%`;
+    track.appendChild(fill);
+    span.appendChild(el('span', `runnow ${tier(p2.overall)}`, String(from)));
+    span.appendChild(track);
+    span.appendChild(el('span', `runceil ${tier(p2.potential)}`, String(to)));
+    span.dataset.tip = `${p2.headroom ?? 0} points of ceiling still reachable`;
+    cardEl.appendChild(span);
+
+    const mins = p2.minutesThisSeason ?? 0;
+    const meter = el('div', 'devmins');
+    const mtrack = el('div', 'btrack');
+    const mfill = el('div', `bfill ${mins >= 900 ? 't3' : mins >= 300 ? 't2' : 't1'}`);
+    mfill.style.width = `${Math.max(2, Math.min(100, Math.round((mins / 900) * 100)))}%`;
+    mtrack.appendChild(mfill);
+    meter.appendChild(el('span', 'devlbl', 'MINUTES'));
+    meter.appendChild(mtrack);
+    meter.appendChild(el('span', 'devval', `${mins}'`));
+    meter.dataset.tip = mins < 300 ? 'Under 300 minutes — growth stalls without games.' : 'Bar is scaled against 900 minutes, a full development season.';
+    cardEl.appendChild(meter);
+
+    const focus = el('div', 'chipwrap devfocus');
+    if (p2.developFocus?.length) {
+      for (const d of p2.developFocus) {
+        const chip = el('span', 'chipish', `${prettyAttr(d.attr)} ${d.value}`);
+        chip.dataset.tip = `${d.percentile}th percentile for his position, heavily weighted in the fit model — growth here buys the most.`;
+        focus.appendChild(chip);
+      }
+    } else {
+      focus.appendChild(el('span', 'muted tiny', 'Balanced profile'));
+    }
+    cardEl.appendChild(focus);
+
+    activatable(cardEl, () => {
+      state.view = 'squad';
+      state.subs.squad = 'hub';
+      state.hubMode = 'attributes';
+      state.hubSel = p2.playerId;
+      localStorage.setItem('view', 'squad');
+      localStorage.setItem('subs', JSON.stringify(state.subs));
+      render();
+    });
+    grid.appendChild(cardEl);
+  }
+  frag.appendChild(grid);
   return frag;
 }
 
@@ -4006,6 +4528,157 @@ function renderShortlist(doc) {
   );
   frag.appendChild(panel);
   return frag;
+}
+
+/**
+ * The campaign, on its own page and in three tiers you can tell apart at a
+ * glance: THE ARC is the career ladder (where am I in the story), THIS SEASON
+ * is the phase's missions, RIGHT NOW is the one-save-away nudges. They used to
+ * share one column and one visual language, which is why nobody could read it.
+ */
+function renderCampaign(doc) {
+  const frag = document.createDocumentFragment();
+  if (!settings.rpg) {
+    const off = el('div', 'panel');
+    off.appendChild(el('h2', null, '🎲 Campaign'));
+    off.appendChild(
+      el('p', 'muted', 'RPG mode is off. Switch it on under Customise › Modes and this page becomes a campaign: a career-long ladder of milestones, missions that re-cut with the phase of the season, and one-save-away nudges — all computed from your real save, never rolled.'),
+    );
+    const go = el('button', 'ghost', 'Open Customise ›');
+    activatable(go, () => {
+      state.view = 'customise';
+      localStorage.setItem('view', 'customise');
+      render();
+    });
+    off.appendChild(go);
+    frag.appendChild(off);
+    return frag;
+  }
+
+  const def = CAMPAIGNS[campaign.type];
+  const ladder = campaignLadder(doc, campaign.type);
+  const { phase, missions, micro } = campaignMissions(doc);
+  const seasonsRun = doc.season ?? 1;
+  const CAREER = 15;
+
+  // --- the banner: which campaign, and how far into the career
+  {
+    const hero = el('div', 'panel camphero');
+    const top = el('div', 'camptop');
+    top.appendChild(el('h2', null, `🎲 ${def.name}`));
+    top.appendChild(el('span', 'campblurb', def.blurb));
+    hero.appendChild(top);
+
+    const steps = el('div', 'seasonsteps');
+    for (let i = 1; i <= CAREER; i++) {
+      const dot = el('i', `sstep${i < seasonsRun ? ' past' : i === seasonsRun ? ' now' : ''}`);
+      dot.dataset.tip = i === seasonsRun ? `Season ${i} — you are here` : `Season ${i}`;
+      steps.appendChild(dot);
+    }
+    hero.appendChild(steps);
+    hero.appendChild(el('p', 'muted tiny', `Season ${seasonsRun} of a ${CAREER}-season career.`));
+    frag.appendChild(hero);
+  }
+
+  const cols = el('div', 'campcols');
+
+  // --- tier 1: the career arc, as a stepper
+  {
+    const panel = el('div', 'panel');
+    if (ladder) {
+      const done = ladder.filter((m) => m.done).length;
+      const h = el('h2', null, '🏔 The arc');
+      panel.appendChild(h);
+      panel.appendChild(el('p', 'muted tiny', `${done} of ${ladder.length} career milestones. These outlast a season — they are the story the save is telling.`));
+      const track = el('div', 'btrack big');
+      const fill = el('div', `bfill${done === ladder.length ? ' done' : ''}`);
+      fill.style.width = `${Math.round((done / ladder.length) * 100)}%`;
+      track.appendChild(fill);
+      panel.appendChild(track);
+
+      const stepper = el('div', 'stepper');
+      let nextNamed = false;
+      for (const m of ladder) {
+        const isNext = !m.done && !nextNamed;
+        if (isNext) nextNamed = true;
+        const row = el('div', `step${m.done ? ' done' : isNext ? ' next' : ''}`);
+        row.appendChild(el('i', 'stepmark', m.done ? '✓' : isNext ? '▶' : ''));
+        const body = el('div', 'stepbody');
+        body.appendChild(el('b', null, m.name));
+        if (m.detail) body.appendChild(el('span', 'stepdetail', m.detail));
+        if (isNext) body.appendChild(el('span', 'stepnow', 'you are here'));
+        row.appendChild(body);
+        stepper.appendChild(row);
+      }
+      panel.appendChild(stepper);
+    } else {
+      panel.appendChild(el('h2', null, '🏔 Your levers'));
+      panel.appendChild(el('p', 'muted tiny', 'A custom campaign: pick the conditions that define it. Each is computed live from the save.'));
+      const pool = rpgChallenges(doc);
+      const lchips = el('div', 'chiprow');
+      for (const c of pool) {
+        const on = campaign.levers.includes(c.name);
+        const chip = el('button', `chip${on ? ' on' : ''}`, c.name);
+        activatable(chip, () => {
+          campaign.levers = on ? campaign.levers.filter((n2) => n2 !== c.name) : [...campaign.levers, c.name];
+          saveCampaign();
+          render();
+        });
+        lchips.appendChild(chip);
+      }
+      panel.appendChild(lchips);
+      for (const c of pool.filter((c2) => campaign.levers.includes(c2.name))) {
+        panel.appendChild(questRow(c.name, c.line, c.pct, c.done));
+      }
+    }
+    cols.appendChild(panel);
+  }
+
+  // --- tiers 2 and 3: the season, and right now
+  {
+    const right = el('div', 'campright');
+
+    const season = el('div', 'panel');
+    season.appendChild(el('h2', null, '📅 This season'));
+    season.appendChild(el('p', 'phasebanner', phase.label));
+    if (missions.length) {
+      for (const c of missions) season.appendChild(questRow(c.name, c.line, c.pct, c.done));
+      season.appendChild(el('p', 'muted tiny', 'Missions re-cut with the phase of the season — the windows, the grind, the run-in.'));
+    } else {
+      season.appendChild(el('p', 'muted tiny', 'No live mission for this phase of this campaign.'));
+    }
+    right.appendChild(season);
+
+    const now = el('div', 'panel');
+    now.appendChild(el('h2', null, '⚡ Right now'));
+    if (micro.length) {
+      for (const c of micro) now.appendChild(questRow(c.name, c.line, c.pct, c.done, true));
+      now.appendChild(el('p', 'muted tiny', 'Small marks, re-read from the leaders\u2019 own numbers with every save.'));
+    } else {
+      now.appendChild(el('p', 'muted tiny', 'Nothing within reach this save — play a few matches and the marks appear.'));
+    }
+    right.appendChild(now);
+
+    cols.appendChild(right);
+  }
+
+  frag.appendChild(cols);
+  return frag;
+}
+
+/** One mission: name, the number behind it, and how far along it is. */
+function questRow(name, line, pct, done, small) {
+  const row = el('div', `quest${small ? ' micro' : ''}${done ? ' is-done' : ''}`);
+  const head = el('div', 'qhead');
+  head.appendChild(el('b', null, `${done ? '✓ ' : ''}${name}`));
+  head.appendChild(el('span', 'qline', line));
+  row.appendChild(head);
+  const track = el('div', 'btrack');
+  const fill = el('div', `bfill${done ? ' done' : ''}`);
+  fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  track.appendChild(fill);
+  row.appendChild(track);
+  return row;
 }
 
 function renderSettings() {
@@ -4130,7 +4803,7 @@ const VIEWS = {
   academy: {
     label: 'Academy',
     subs: [
-      { id: 'players', label: 'My Academy', render: (d) => renderPlayers(d.academy), players: true, count: (d) => d.academy.length || null },
+      { id: 'players', label: 'My Academy', render: (d) => renderPlayers(d.academy, { title: '🎓 My academy' }), players: true, count: (d) => d.academy.length || null },
       { id: 'scouting', label: 'Scout Reports', render: renderScouting, count: (d) => d.scouts.length || null },
     ],
   },
@@ -4145,7 +4818,13 @@ const VIEWS = {
       { id: 'challenges', label: 'Challenges', render: renderChallenges },
     ],
   },
-  story: { label: 'Story', render: renderStory, count: () => null },
+  story: {
+    label: 'Story',
+    subs: [
+      { id: 'card', label: 'Brag card', render: renderStory },
+      { id: 'campaign', label: 'Campaign', render: renderCampaign },
+    ],
+  },
   customise: { label: 'Customise', render: renderSettings, count: () => null },
 };
 
@@ -4291,6 +4970,39 @@ ${a.evidence}  [${a.rule}]`;
   }
 }
 
+/**
+ * Panels state their name and show their numbers. Anything explanatory folds
+ * into an `i` on the heading — one affordance, one place, no walls of prose.
+ * Applied to the built DOM so no view has to remember to do it.
+ */
+function polishPanels(root) {
+  for (const panel of root.querySelectorAll('.panel')) {
+    const h = panel.querySelector(':scope > h2');
+    if (!h) continue;
+
+    // The heading is a name, not a decorated sentence.
+    for (const node of h.childNodes) {
+      if (node.nodeType !== 3) continue;
+      node.textContent = node.textContent.replace(
+        /^[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}]+\s*/u,
+        '',
+      );
+    }
+
+    // Every explanatory paragraph the panel owns, wherever it sits.
+    const kids = [...panel.children];
+    const prose = kids.filter((k) => k.tagName === 'P' && k.classList.contains('muted'));
+    const substantive = kids.filter((k) => k !== h && !prose.includes(k)).length;
+    if (!prose.length || substantive === 0) continue;
+
+    const info = el('button', 'infobtn', 'i');
+    info.setAttribute('aria-label', 'About this panel');
+    info.dataset.tip = prose.map((x) => x.textContent.trim()).filter(Boolean).join('\n\n');
+    h.appendChild(info);
+    for (const x of prose) x.remove();
+  }
+}
+
 function render() {
   window.__doc = state.doc;
   document.body.classList.toggle('compact', !!settings.compact);
@@ -4325,6 +5037,7 @@ function render() {
 
 
   main.appendChild((activeSub()?.render ?? VIEWS[state.view].render)(doc));
+  polishPanels(main);
 
   $('#counts').textContent =
     `${doc.senior.length} senior · ${doc.academy.length} academy · season ${doc.season ?? '?'} · ` +

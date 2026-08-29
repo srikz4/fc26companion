@@ -119,6 +119,12 @@ export interface TransferTarget {
   /** Best channel vs the strongest existing channel of the same pattern. */
   synergyGain: number | null;
   reasons: string[];
+  /**
+   * The same reasoning, structured so the client can badge it instead of
+   * printing a semicolon-jammed sentence. `kind` drives the colour, `text` is
+   * the short form, `detail` the full sentence for the tooltip.
+   */
+  reasonTags: { kind: 'gap' | 'upgrade' | 'contract' | 'synergy' | 'affinity' | 'growth'; text: string; detail: string }[];
 }
 
 export interface TransferSearch {
@@ -238,20 +244,29 @@ export function findTargets(
       const wantsUs = ourClubId !== null && (affinity.get(playerId)?.has(ourClubId) ?? false);
 
       const reasons: string[] = [];
-      if (gap.severity === 'gap') reasons.push(`fills a hole at ${gap.slot}`);
-      else if (gap.severity === 'thin') reasons.push(`adds depth at ${gap.slot}`);
-      if (upgrade > 0) reasons.push(`${upgrade} better fit than our best ${gap.slot}`);
-      if (months !== null && months <= 12) reasons.push(`${months} months left on their contract`);
+      const reasonTags: TransferTarget['reasonTags'] = [];
+      const tag = (kind: TransferTarget['reasonTags'][number]['kind'], text: string, detail: string): void => {
+        reasonTags.push({ kind, text, detail });
+        reasons.push(detail);
+      };
+
+      if (gap.severity === 'gap') tag('gap', `Fills ${gap.slot}`, `fills a hole at ${gap.slot}`);
+      else if (gap.severity === 'thin') tag('gap', `Depth ${gap.slot}`, `adds depth at ${gap.slot}`);
+      if (upgrade > 0) tag('upgrade', `+${upgrade} fit`, `${upgrade} better fit than our best ${gap.slot}`);
+      if (months !== null && months <= 12) {
+        tag('contract', months <= 6 ? 'Deal expiring' : `${months}m left`, `${months} months left on their contract`);
+      }
       if (syn.best[0]) {
-        reasons.push(
-          `${syn.best[0].channel} ${syn.best[0].strength} with ${nameOf(
-            syn.best[0].supplier === playerId ? syn.best[0].receiver : syn.best[0].supplier,
-          )}`,
+        const partner = nameOf(syn.best[0].supplier === playerId ? syn.best[0].receiver : syn.best[0].supplier);
+        tag(
+          'synergy',
+          `${syn.best[0].channel} ${syn.best[0].strength}`,
+          `${syn.best[0].channel} ${syn.best[0].strength} with ${partner}`,
         );
       }
-      if (wantsUs) reasons.push('the save records affinity toward this club');
+      if (wantsUs) tag('affinity', 'Wants us', 'the save records affinity toward this club');
       if (potential !== null && potential - overall >= 8) {
-        reasons.push(`${potential - overall} of headroom left`);
+        tag('growth', `+${potential - overall} to grow`, `${potential - overall} of headroom left`);
       }
 
       targets.push({
@@ -278,6 +293,7 @@ export function findTargets(
         synergy: syn.best,
         synergyGain: syn.gainOverIncumbent,
         reasons,
+        reasonTags,
       });
     }
   }
