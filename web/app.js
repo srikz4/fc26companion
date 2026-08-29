@@ -3873,24 +3873,120 @@ const campaign = (() => {
   }
 })();
 const saveCampaign = () => localStorage.setItem('campaign', JSON.stringify(campaign));
+if (!Array.isArray(campaign.blend)) campaign.blend = [];
 
+/**
+ * The campaigns.
+ *
+ * `creed` is the one line the campaign judges you by; `chapters` names the
+ * phases of a season in its own voice, so the same August reads differently
+ * under Moneyball than under Invincibles. Everything else about a campaign —
+ * its ladder, its missions — is computed from the save.
+ */
 const CAMPAIGNS = {
-  rtg: { name: 'Road to Glory', blurb: 'Climb until the biggest trophies stop being dreams.' },
-  treble: { name: 'The Treble', blurb: 'League, cup and Europe — in one impossible season.' },
-  invincible: { name: 'Invincibles', blurb: 'A season nobody beats you.' },
-  century: { name: 'Century Club', blurb: 'Goals until the nets complain.' },
-  wall: { name: 'The Wall', blurb: 'Build the meanest defence this save has ever recorded.' },
-  youthrev: { name: 'Youth Revolution', blurb: 'The youngest team in the land, and the best.' },
-  academy: { name: 'Academy Project', blurb: 'A first team grown, not bought.' },
-  moneyball: { name: 'Moneyball', blurb: 'Win while the books stay green.' },
-  custom: { name: 'Custom', blurb: 'Your levers, your rules.' },
+  rtg: {
+    name: 'Road to Glory',
+    blurb: 'Climb until the biggest trophies stop being dreams.',
+    creed: 'Every season should end higher than the last.',
+    chapters: { summer: 'The rebuild', autumn: 'The climb', winter: 'The correction', runin: 'The run-in', review: 'The reckoning' },
+  },
+  treble: {
+    name: 'The Treble',
+    blurb: 'League, cup and Europe — in one impossible season.',
+    creed: 'Three trophies or the season was a rehearsal.',
+    chapters: { summer: 'Assembling the squad', autumn: 'Three fronts', winter: 'Holding all three', runin: 'The convergence', review: 'What was won' },
+  },
+  invincible: {
+    name: 'Invincibles',
+    blurb: 'A season nobody beats you.',
+    creed: 'The zero in the loss column is the whole story.',
+    chapters: { summer: 'Before the first test', autumn: 'The streak', winter: 'The nerves', runin: 'The last miles', review: 'Where it broke, or did not' },
+  },
+  century: {
+    name: 'Century Club',
+    blurb: 'Goals until the nets complain.',
+    creed: 'A hundred goals, and style is not optional.',
+    chapters: { summer: 'Loading the guns', autumn: 'The barrage', winter: 'Keeping the rate', runin: 'The chase for a hundred', review: 'The count' },
+  },
+  wall: {
+    name: 'The Wall',
+    blurb: 'Build the meanest defence this save has ever recorded.',
+    creed: 'Concede nothing and the rest takes care of itself.',
+    chapters: { summer: 'Laying bricks', autumn: 'The shutout run', winter: 'Cracks and repairs', runin: 'Holding the line', review: 'What got through' },
+  },
+  youthrev: {
+    name: 'Youth Revolution',
+    blurb: 'The youngest team in the land, and the best.',
+    creed: 'If he is old enough, he is good enough.',
+    chapters: { summer: 'The intake', autumn: 'Learning in public', winter: 'Growing pains', runin: 'The kids hold on', review: 'How far they came' },
+  },
+  academy: {
+    name: 'Academy Project',
+    blurb: 'A first team grown, not bought.',
+    creed: 'Every shirt earned in your own academy.',
+    chapters: { summer: 'Promotions', autumn: 'Minutes for the young', winter: 'The temptation to buy', runin: 'Trusting them', review: 'The graduation' },
+  },
+  moneyball: {
+    name: 'Moneyball',
+    blurb: 'Win while the books stay green.',
+    creed: 'Value is the only currency that compounds.',
+    chapters: { summer: 'Buy low', autumn: 'Proving the model', winter: 'Sell high', runin: 'The margin', review: 'The balance sheet' },
+  },
+  custom: {
+    name: 'Custom',
+    blurb: 'Blend the campaigns you care about.',
+    creed: 'Your rules, held to the same standard.',
+    chapters: { summer: 'The window', autumn: 'The grind', winter: 'Midwinter', runin: 'The run-in', review: 'The review' },
+  },
 };
+
+/** The majors a custom campaign can blend. */
+const BLENDABLE = ['rtg', 'treble', 'invincible', 'century', 'wall', 'youthrev', 'academy', 'moneyball'];
+
+/**
+ * Which campaigns are actually in play: the chosen one, or — for a custom
+ * blend — every major the user picked. The blend is what makes the ladder and
+ * the missions coherent rather than a pile of unrelated conditions.
+ */
+function activeCampaigns() {
+  if (campaign.type !== 'custom') return [campaign.type];
+  const picked = (campaign.blend ?? []).filter((k) => BLENDABLE.includes(k));
+  return picked.length ? picked : [];
+}
 
 /**
  * Career-long milestone ladders, computed from the whole recorded history —
  * seasons, trophies, the squad — so the arc runs toward the end of a 15-season
  * career instead of resetting every August.
  */
+/**
+ * The ladder for whatever is in play. A single campaign gives its own; a blend
+ * interleaves its campaigns' ladders so the arc reads as one story with each
+ * milestone labelled by the strand it belongs to.
+ */
+function activeLadder(doc) {
+  const types = activeCampaigns();
+  if (types.length === 0) return null;
+  if (types.length === 1) return campaignLadder(doc, types[0]);
+
+  const strands = types
+    .map((t) => ({ t, rungs: campaignLadder(doc, t) ?? [] }))
+    .filter((x) => x.rungs.length);
+  if (!strands.length) return null;
+
+  // Interleave by depth so the blend advances on every front at once rather
+  // than finishing one campaign before starting the next.
+  const out = [];
+  const depth = Math.max(...strands.map((x) => x.rungs.length));
+  for (let i = 0; i < depth; i++) {
+    for (const strand of strands) {
+      const rung = strand.rungs[i];
+      if (rung) out.push({ ...rung, strand: CAMPAIGNS[strand.t].name });
+    }
+  }
+  return out;
+}
+
 function campaignLadder(doc, type) {
   const seasons = doc.seasons ?? [];
   const cur2 = seasons[seasons.length - 1] ?? null;
@@ -4004,12 +4100,27 @@ function campaignLadder(doc, type) {
 /** Where the season stands: windows open and shut, and the missions follow. */
 function seasonPhase(doc) {
   const m = doc.gameDate ? Math.floor(doc.gameDate / 100) % 100 : null;
-  if (m === null) return { id: 'unknown', label: 'Season in progress' };
-  if (m === 7 || m === 8) return { id: 'summer', label: 'Summer window — squad building' };
-  if (m === 1) return { id: 'winter', label: 'Winter window — one correction allowed' };
-  if (m === 6) return { id: 'review', label: 'Season review' };
-  if (m >= 2 && m <= 5) return { id: 'runin', label: 'The run-in — every point is a final' };
-  return { id: 'autumn', label: 'Autumn — the grind that decides May' };
+  const base =
+    m === null
+      ? { id: 'unknown', label: 'Season in progress' }
+      : m === 7 || m === 8
+        ? { id: 'summer', label: 'Summer window — squad building' }
+        : m === 1
+          ? { id: 'winter', label: 'Winter window — one correction allowed' }
+          : m === 6
+            ? { id: 'review', label: 'Season review' }
+            : m >= 2 && m <= 5
+              ? { id: 'runin', label: 'The run-in — every point is a final' }
+              : { id: 'autumn', label: 'Autumn — the grind that decides May' };
+
+  // With a campaign running, the same month is named in its voice: August is
+  // "Loading the guns" under Century Club and "Buy low" under Moneyball.
+  if (settings.rpg) {
+    const lead = activeCampaigns()[0] ?? campaign.type;
+    const chapter = CAMPAIGNS[lead]?.chapters?.[base.id];
+    if (chapter) return { ...base, label: chapter, plain: base.label };
+  }
+  return base;
 }
 
 /**
@@ -4034,7 +4145,8 @@ function campaignMissions(doc) {
   const acadShare = acadMin / totalMin;
   const windowOpen = phase.id === 'summer' || phase.id === 'winter';
 
-  const type = campaign.type;
+  for (const type of activeCampaigns()) buildMissionsFor(type);
+  function buildMissionsFor(type) {
   if (type === 'wall') {
     if (gapg !== null) push('Keep the door shut', `Concede under 0.9 a game — at ${gapg.toFixed(2)}.`, (0.9 / Math.max(gapg, 0.01)) * 100, gapg <= 0.9, 'squad/tactics');
     if (windowOpen && gaps.some((g) => ['GK', 'CB', 'FB'].includes(g.slot)))
@@ -4069,12 +4181,20 @@ function campaignMissions(doc) {
     const alive = (doc.board?.competitions ?? []).filter((c) => c.season === doc.season && !c.won && c.result === -1 && !c.notStarted).length;
     push('Stay alive everywhere', `${alive} competition${alive === 1 ? '' : 's'} still running — lose none of them.`, alive > 0 ? 100 : 0, alive >= 2, 'squad/tactics');
     if (ppg !== null) push('League pace', `${(ppg * 38).toFixed(0)}-point pace — the treble starts with the title.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88, 'squad/tactics');
-  } else if (type !== 'custom') {
+  } else {
     if (ppg !== null) push('Title pace', `${(ppg * 38).toFixed(0)} points over 38 at this rate — hold 88+.`, ((ppg * 38) / 88) * 100, ppg * 38 >= 88, 'squad/tactics');
     if (winRate !== null && phase.id === 'runin') push('The run-in', `Win rate ${(winRate * 100).toFixed(0)}% — champions close at 70%+.`, (winRate / 0.7) * 100, winRate >= 0.7, 'squad/tactics');
     if (windowOpen && gaps.length) push('Cover the gaps', `${gaps.map((g) => g.slot).join(' · ')} thin while the window is open.`, 0, false, 'transfers/targets');
     else if (windowOpen) push('Squad complete', 'No line is thin — spend nothing you do not need to.', 100, true, 'transfers/targets');
   }
+  }
+  // A blend can ask for the same thing twice; say it once.
+  const seenMission = new Set();
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (seenMission.has(out[i].name)) out.splice(i, 1);
+    else seenMission.add(out[i].name);
+  }
+
   // Micro: one-save-away nudges from the leaders' own numbers.
   const micro = [];
   const scorer = (doc.stats.topScorers ?? [])[0];
@@ -4492,7 +4612,7 @@ function renderCentral(doc) {
 
   if (settings.rpg) {
     const box = el('div');
-    const ladder = campaignLadder(doc, campaign.type);
+    const ladder = activeLadder(doc);
     if (ladder) {
       const done = ladder.filter((m) => m.done).length;
       const track = el('div', 'btrack');
@@ -4719,7 +4839,8 @@ function renderCampaign(doc) {
   }
 
   const def = CAMPAIGNS[campaign.type];
-  const ladder = campaignLadder(doc, campaign.type);
+  const blend = activeCampaigns();
+  const ladder = activeLadder(doc);
   const { phase, missions, micro } = campaignMissions(doc);
   const seasonsRun = doc.season ?? 1;
   const CAREER = 15;
@@ -4728,9 +4849,19 @@ function renderCampaign(doc) {
   {
     const hero = el('div', 'panel camphero');
     const top = el('div', 'camptop');
-    top.appendChild(el('h2', null, `🎲 ${def.name}`));
+    top.appendChild(el('h2', null, def.name));
     top.appendChild(el('span', 'campblurb', def.blurb));
     hero.appendChild(top);
+    if (def.creed) hero.appendChild(el('p', 'campcreed', def.creed));
+    if (campaign.type === 'custom' && blend.length) {
+      const strands = el('div', 'chipwrap');
+      for (const k of blend) {
+        const chip = el('span', 'strandchip', CAMPAIGNS[k].name);
+        chip.dataset.tip = CAMPAIGNS[k].creed ?? CAMPAIGNS[k].blurb;
+        strands.appendChild(chip);
+      }
+      hero.appendChild(strands);
+    }
 
     const steps = el('div', 'seasonsteps');
     for (let i = 1; i <= CAREER; i++) {
@@ -4772,6 +4903,7 @@ function renderCampaign(doc) {
         row.appendChild(el('i', 'stepmark', m.done ? '✓' : isNext ? '▶' : ''));
         const body = el('div', 'stepbody');
         body.appendChild(el('b', null, m.name));
+        if (m.strand) body.appendChild(el('span', 'strandtag', m.strand));
         if (m.detail) body.appendChild(el('span', 'stepdetail', m.detail));
         if (isNext) body.appendChild(el('span', 'stepnow', 'you are here'));
         row.appendChild(body);
@@ -4779,24 +4911,17 @@ function renderCampaign(doc) {
       }
       panel.appendChild(stepper);
     } else {
-      panel.appendChild(el('h2', null, '🏔 Your levers'));
-      panel.appendChild(el('p', 'muted tiny', 'A custom campaign: pick the conditions that define it. Each is computed live from the save.'));
-      const pool = rpgChallenges(doc);
-      const lchips = el('div', 'chiprow');
-      for (const c of pool) {
-        const on = campaign.levers.includes(c.name);
-        const chip = el('button', `chip${on ? ' on' : ''}`, c.name);
-        activatable(chip, () => {
-          campaign.levers = on ? campaign.levers.filter((n2) => n2 !== c.name) : [...campaign.levers, c.name];
-          saveCampaign();
-          render();
-        });
-        lchips.appendChild(chip);
-      }
-      panel.appendChild(lchips);
-      for (const c of pool.filter((c2) => campaign.levers.includes(c2.name))) {
-        panel.appendChild(questRow(c.name, c.line, c.pct, c.done));
-      }
+      panel.appendChild(el('h2', null, 'Your blend'));
+      panel.appendChild(
+        el('p', 'muted', 'A custom campaign is a mixture of the others. Pick the strands you care about under Customise and their ladders interleave here, so the arc advances on every front at once instead of finishing one story before starting the next.'),
+      );
+      const go = el('button', 'ghost', 'Choose your strands ›');
+      activatable(go, () => {
+        state.view = 'customise';
+        localStorage.setItem('view', 'customise');
+        render();
+      });
+      panel.appendChild(go);
     }
     cols.appendChild(panel);
   }
@@ -4807,7 +4932,9 @@ function renderCampaign(doc) {
 
     const season = el('div', 'panel');
     season.appendChild(el('h2', null, '📅 This season'));
-    season.appendChild(el('p', 'phasebanner', phase.label));
+    const banner = el('p', 'phasebanner', phase.label);
+    if (phase.plain) banner.dataset.tip = phase.plain;
+    season.appendChild(banner);
     if (missions.length) {
       for (const c of missions) season.appendChild(questRow(c.name, c.line, c.pct, c.done));
       season.appendChild(el('p', 'muted tiny', 'Missions re-cut with the phase of the season — the windows, the grind, the run-in.'));
@@ -5008,7 +5135,7 @@ function renderChronicle(doc) {
   frag.appendChild(book);
 
   if (settings.rpg) {
-    const ladder = campaignLadder(doc, campaign.type);
+    const ladder = activeLadder(doc);
     if (ladder) {
       const done = ladder.filter((m) => m.done);
       const panel = el('div', 'panel questpanel');
@@ -5095,13 +5222,19 @@ function renderSettings() {
           chips.appendChild(chip);
         }
         txt.appendChild(chips);
-        if (campaign.type === 'custom' && state.doc) {
+        if (campaign.type === 'custom') {
+          txt.appendChild(
+            el('p', 'muted tiny', 'Blend two or three. Their ladders interleave and their missions merge, so the campaign stays one story.'),
+          );
           const lchips = el('div', 'chiprow');
-          for (const c of rpgChallenges(state.doc)) {
-            const on = campaign.levers.includes(c.name);
-            const chip = el('button', `chip${on ? ' on' : ''}`, c.name);
+          for (const k of BLENDABLE) {
+            const on = (campaign.blend ?? []).includes(k);
+            const chip = el('button', `chip${on ? ' on' : ''}`, CAMPAIGNS[k].name);
+            chip.dataset.tip = CAMPAIGNS[k].creed ?? CAMPAIGNS[k].blurb;
             activatable(chip, () => {
-              campaign.levers = on ? campaign.levers.filter((n2) => n2 !== c.name) : [...campaign.levers, c.name];
+              campaign.blend = on
+                ? campaign.blend.filter((x) => x !== k)
+                : [...(campaign.blend ?? []), k];
               saveCampaign();
               render();
             });

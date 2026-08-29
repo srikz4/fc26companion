@@ -964,10 +964,8 @@ td.stars.m1 { color: var(--m1); }
   font-variant-numeric: tabular-nums;
 }
 #synced { font-size: 12px; color: var(--ink-faint); display: inline-flex; align-items: center; gap: 5px; }
-#synced::before {
-  content: ''; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--brand); box-shadow: 0 0 6px var(--brand);
-}
+/* The dot is a real element now (#syncdot) so it can carry state; this
+   pseudo-element was the second one showing up beside it. */
 
 /* Theme: one pill, three segments, painted in its own theme. */
 .themeseg {
@@ -1908,4 +1906,18 @@ main > .panel + .panel { margin-top: 14px; }
   .subtab { flex: none; padding: 9px 11px; font-size: 12.5px; }
   .subtab .count { margin-left: 4px; padding: 1px 5px; }
   .views { mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%); }
+}
+
+/* ============================================================ campaign voice */
+.campcreed {
+  margin: 2px 0 6px; font-size: 13.5px; font-style: italic;
+  color: var(--rpg); opacity: 0.92;
+}
+.strandchip {
+  font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+  border: 1px solid var(--rpg-line); color: var(--rpg); background: var(--rpg-bg);
+}
+.strandtag {
+  font-size: 9px; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 800;
+  color: var(--rpg); border: 1px solid var(--rpg-line); border-radius: 999px; padding: 1px 7px;
 }
