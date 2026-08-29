@@ -1502,6 +1502,8 @@ td.res.r-l { color: var(--down); }
 .legmark .fpip { width: 14px; height: 14px; font-size: 8.5px; border-radius: 3px; }
 .legmark b { font-size: 11px; font-weight: 800; }
 .legtext { font-size: 11.5px; color: var(--ink-faint); }
+/* A whole-width note under a key, for the caveat that applies to all of it. */
+.legnote { flex-basis: 100%; font-size: 11px; color: var(--ink-faint); }
 .unnamedchip { font-size: 10.5px; font-style: italic; color: var(--ink-faint); white-space: nowrap; }
 
 /* ============================================================ save file picker */

@@ -96,6 +96,17 @@ const state = {
   sortAsc: false,
   dwell: true,
   filters: new Set(JSON.parse(localStorage.getItem('filters') || '[]')),
+  /** Column sorts, per table, so a rebuild does not undo one. */
+  sorts: (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('sorts') || '{}');
+      return raw && typeof raw === 'object' ? raw : {};
+    } catch {
+      return {};
+    }
+  })(),
+  /** Set when a card has just been opened, so the next render can reveal it. */
+  reveal: false,
   rail: localStorage.getItem('rail') !== 'hidden',
   wageSel: null,
   wageFilter: 'all',
@@ -1049,6 +1060,45 @@ function table(headers, rows, opts = {}) {
   const rowsAreOpenable = !!(opts.keys && opts.onRow);
   if (rowsAreOpenable) headers = [{ label: '', always: true, zone: true }, ...headers];
 
+  /**
+   * Which table this is, so its sort can be remembered.
+   *
+   * Keyed on the column labels rather than a hand-written id: two tables with
+   * the same columns are the same table as far as sorting goes, and no call site
+   * has to remember to pass anything.
+   */
+  const sortKey = opts.sortKey ?? headers.map((h) => (typeof h === 'object' ? h.label : h)).join('|');
+
+  const sortBy = (col, asc) => {
+    for (const other of hr.children) other.classList.remove('on', 'asc');
+    const th = hr.children[col];
+    if (th) {
+      th.classList.add('on');
+      if (asc) th.classList.add('asc');
+    }
+    const body = t.querySelector('tbody');
+    if (!body) return;
+    // Detail rows travel with their parent, so sort only the real rows and
+    // re-attach each detail underneath the row it belongs to.
+    const dataRows = [...body.children].filter((r) => !r.classList.contains('detailrow'));
+    const sorted = dataRows.sort((ra, rb) => {
+      const va = ra.children[col]?.dataset.sort ?? '';
+      const vb = rb.children[col]?.dataset.sort ?? '';
+      const na = Number(va);
+      const nb = Number(vb);
+      const cmp =
+        !Number.isNaN(na) && !Number.isNaN(nb) && va !== '' && vb !== ''
+          ? na - nb
+          : String(va).localeCompare(String(vb));
+      return asc ? cmp : -cmp;
+    });
+    for (const r of sorted) {
+      const detail = r.nextElementSibling?.classList.contains('detailrow') ? r.nextElementSibling : null;
+      body.appendChild(r);
+      if (detail) body.appendChild(detail);
+    }
+  };
+
   const thead = el('thead');
   const hr = el('tr');
   headers.forEach((h, col) => {
@@ -1064,28 +1114,15 @@ function table(headers, rows, opts = {}) {
       // A position column starts ascending (GK first, football order);
       // everything else starts with the biggest number on top.
       const asc = th.classList.contains('on') ? !th.classList.contains('asc') : !!(isObj && h.pos);
-      for (const other of hr.children) other.classList.remove('on', 'asc');
-      th.classList.add('on');
-      if (asc) th.classList.add('asc');
-      const body = t.querySelector('tbody');
-      // Detail rows travel with their parent, so sort only the real rows and
-      // re-attach each detail underneath the row it belongs to.
-      const dataRows = [...body.children].filter((r) => !r.classList.contains('detailrow'));
-      const sorted = dataRows.sort((ra, rb) => {
-        const va = ra.children[col]?.dataset.sort ?? '';
-        const vb = rb.children[col]?.dataset.sort ?? '';
-        const na = Number(va);
-        const nb = Number(vb);
-        const cmp =
-          !Number.isNaN(na) && !Number.isNaN(nb) && va !== '' && vb !== ''
-            ? na - nb
-            : String(va).localeCompare(String(vb));
-        return asc ? cmp : -cmp;
-      });
-      for (const r of sorted) {
-        const detail = r.nextElementSibling?.classList.contains('detailrow') ? r.nextElementSibling : null;
-        body.appendChild(r);
-        if (detail) body.appendChild(detail);
+      sortBy(col, asc);
+      // Remembered, because the page rebuilds itself every time the game saves
+      // and every time a card opens. A sort that survives neither is a sort you
+      // have to keep redoing for no reason you can see.
+      state.sorts[sortKey] = { col, asc };
+      try {
+        localStorage.setItem('sorts', JSON.stringify(state.sorts));
+      } catch {
+        /* a browser refusing storage is not a reason to fail the sort */
       }
     });
     hr.appendChild(th);
@@ -1154,6 +1191,8 @@ function table(headers, rows, opts = {}) {
     }
   });
   t.appendChild(tbody);
+  const remembered = state.sorts[sortKey];
+  if (remembered && remembered.col < headers.length) sortBy(remembered.col, remembered.asc);
   wrap.appendChild(t);
   return wrap;
 }
@@ -1298,6 +1337,7 @@ function renderPlayers(list, opts = {}) {
         onRow: (key) => {
           const id = Number(key);
           state.rosterSel = state.rosterSel === id ? null : id;
+          state.reveal = state.rosterSel !== null;
           render();
         },
       },
@@ -1310,8 +1350,68 @@ function renderPlayers(list, opts = {}) {
       'Tap a row for the card. ⚑ national-team call-up · ◆ Special / Exciting ceiling · Δ rating change this season · action colours: red act now, amber this window, blue keep an eye.',
     ),
   );
+  panel.appendChild(squadMarkKey());
   frag.appendChild(panel);
   return frag;
+}
+
+/**
+ * What the marks beside a player's name mean.
+ *
+ * The same discipline as the league table's key: every mark listed whether or
+ * not today's squad happens to show one, because the moment you first meet a
+ * symbol is exactly when its explanation needs to be on screen. The roles are
+ * spelled out too — the badge changes with the position, and a shield on a
+ * centre-back is not the same claim as a flame on a striker.
+ */
+function squadMarkKey() {
+  const wrap = el('div', 'legend');
+  const item = (build, label) => {
+    const row = el('span', 'legitem');
+    const mark = el('span', 'legmark');
+    build(mark);
+    row.appendChild(mark);
+    row.appendChild(el('span', 'legtext', label));
+    wrap.appendChild(row);
+  };
+  const streak = (tone, heat, glyph, label) => {
+    item((m) => {
+      const holder = el('span', `streak ${tone} ${heat}`);
+      holder.appendChild(icon(glyph, 13));
+      m.appendChild(holder);
+    }, label);
+  };
+  streak('hot', 'blaze', 'flame', 'hat-trick last time out');
+  streak('hot', 'spark', 'flame', 'a brace, or a scoring run');
+  streak('good', 'spark', 'shield', 'a defender holding firm');
+  streak('good', 'spark', 'compass', 'a midfielder running the game');
+  streak('good', 'spark', 'zap', 'a winger unplayable out wide');
+  streak('good', 'spark', 'target', 'a forward leading the line');
+  streak('hot', 'blaze', 'shield', 'five or more at 8 and above');
+  streak('cold', 'blaze', 'snowflake', 'three or more at 5 and below');
+  item((m) => {
+    const holder = el('i', 'mk down');
+    holder.appendChild(icon('cross', 13));
+    m.appendChild(holder);
+  }, 'injured');
+  item((m) => {
+    const holder = el('i', 'mk info');
+    holder.appendChild(icon('flag', 13));
+    m.appendChild(holder);
+  }, 'away with his country');
+  item((m) => {
+    const holder = el('i', 'mk gold');
+    holder.appendChild(icon('gem', 13));
+    m.appendChild(holder);
+  }, 'Special or Exciting ceiling');
+  wrap.appendChild(
+    el(
+      'span',
+      'legitem legnote',
+      'Form comes from the match ratings the game itself gave, over the window the save keeps. Unused substitutes are not counted.',
+    ),
+  );
+  return wrap;
 }
 
 /**
@@ -2809,6 +2909,7 @@ function renderScouting(doc) {
             onRow: (key) => {
               const id = Number(key);
               state.reportSel = state.reportSel === id ? null : id;
+              state.reveal = state.reportSel !== null;
               render();
             },
           },
@@ -3036,6 +3137,9 @@ function renderSquadViews(doc, source, title) {
     onRow: (key) => {
       const id = Number(key);
       state.hubSel = state.hubSel === id ? null : id;
+      // A card opens below its row, which on a long table can be off the bottom
+      // of the screen; ask the next render to bring it into view.
+      state.reveal = state.hubSel !== null;
       render();
     },
   };
@@ -4909,16 +5013,31 @@ function renderCentral(doc) {
   }
 
   if (settings.newsFeed && doc.calendar?.events?.length) {
+    /**
+     * The save's own news feed.
+     *
+     * Only one kind of entry is understood: a transfer, which names both clubs.
+     * The rest carry a player, a club and a date but no readable label, and
+     * "event #2" told you nothing you could act on. They are counted rather
+     * than captioned, because an honest gap reads better than a fake headline.
+     */
+    const named = doc.calendar.events.filter((e) => e.eventId === 5 && e.team1 && e.team2);
+    const unlabelled = doc.calendar.events.length - named.length;
     const box = el('div');
-    for (const e of doc.calendar.events.slice(0, 10)) {
-      todoRow(
-        box,
-        fmtDate(e.date),
-        e.player ?? e.team1 ?? `event ${e.eventId}`,
-        e.eventId === 5 && e.team1 && e.team2 ? `${e.team1} → ${e.team2}` : e.team2 ? `${e.team1 ?? '?'} · ${e.team2}` : `event #${e.eventId}~`,
+    for (const e of named.slice(0, 10)) {
+      todoRow(box, fmtDate(e.date), e.player ?? e.team1, `${e.team1} → ${e.team2}`);
+    }
+    if (!named.length) box.appendChild(el('p', 'muted tiny', 'No transfers in the feed yet.'));
+    if (unlabelled) {
+      box.appendChild(
+        el(
+          'p',
+          'muted tiny',
+          `${unlabelled} other ${unlabelled === 1 ? 'entry' : 'entries'} carry a player, a club and a date but not what happened. The save does not label the kind in a way Companion can read yet, so they are left out rather than captioned with a number.`,
+        ),
       );
     }
-    panel(colMain, '📰 Around the world', box);
+    panel(colMain, 'Transfers around the world', box);
   }
 
   // ---------- side column: what needs you ----------
@@ -6040,7 +6159,20 @@ function render() {
 
   renderShell(doc);
   hideTip();
-  requestAnimationFrame(() => window.scrollTo(0, scrollY));
+  requestAnimationFrame(() => {
+    // Restoring the old position is right for a background refresh, but wrong
+    // the moment you opened something: then the thing you opened is what you
+    // want to be looking at.
+    if (state.reveal) {
+      state.reveal = false;
+      const card = document.querySelector('tr.detailrow');
+      if (card) {
+        card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+    }
+    window.scrollTo(0, scrollY);
+  });
 
 
   main.appendChild((activeSub()?.render ?? VIEWS[state.view].render)(doc));

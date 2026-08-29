@@ -1105,7 +1105,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       blockedBy,
       depthRank: depthRank >= 0 ? depthRank + 1 : null,
       depthRankTwoPotential: depth[1]?.potential ?? null,
-      injured: (num(link, 'injury') ?? 0) !== 0,
+      injured: injuryEndsAt.has(id) || (num(link, 'injury') ?? 0) !== 0,
       retiring: (num(player, 'isretiring') ?? 0) !== 0,
       selectionCost: selectionCostFor.get(id) ?? null,
     };
@@ -1169,7 +1169,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
 
       form: FORM_LABELS[num(link, 'form') ?? -1] ?? null,
       morale: MORALE_LABELS[num(player, 'emotion') ?? -1] ?? null,
-      injured: (num(link, 'injury') ?? 0) !== 0,
+      injured: injuryEndsAt.has(id) || (num(link, 'injury') ?? 0) !== 0,
       retiring: (num(player, 'isretiring') ?? 0) !== 0,
       transferBlocked: blocked.has(id),
       onLoan: loaned.has(id),
@@ -1929,6 +1929,18 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   // manager needs, and "a 29-day injury" is not.
   const injuryDays = new Map<number, number>();
   for (const [pid, ends] of injuryEndsAt) injuryDays.set(pid, Math.max(0, ends - injuryToday));
+  /**
+   * Who steps in, and why it must not be someone already picked.
+   *
+   * The point of the suggestion is to fill the hole the injury leaves. Naming a
+   * player who is already in the XI does not fill it — he cannot be in two
+   * places — it just moves the hole somewhere else and calls it solved. So the
+   * search is over players who are actually free: fit, and not already selected.
+   *
+   * If the whole XI is the only cover, the answer is that there is none, which
+   * is worth knowing.
+   */
+  const pickedAlready = new Set((savedXI?.players ?? []).map((pl) => pl.playerId));
   const standIn = (outId: number): { playerId: number; name: string; fit: number } | null => {
     const row = players.get(outId);
     const slot = row ? slotOf(num(row, 'preferredposition1')) : null;
@@ -1936,7 +1948,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     let best: { playerId: number; name: string; fit: number } | null = null;
     for (const r of seniorRows) {
       const pid = num(r, 'playerid')!;
-      if (pid === outId || availability.has(pid)) continue;
+      if (pid === outId || availability.has(pid) || pickedAlready.has(pid)) continue;
       const fit = fitFor(r, slot)?.value ?? null;
       if (fit !== null && (best === null || fit > best.fit)) {
         best = { playerId: pid, name: nameOf(pid), fit: Math.round(fit * 10) / 10 };
