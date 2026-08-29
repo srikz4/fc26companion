@@ -1325,6 +1325,59 @@ td.mv-up { color: var(--up); font-weight: 800; font-size: 11px; }
 td.mv-down { color: var(--down); font-weight: 800; font-size: 11px; }
 td.mv-flat { color: var(--ink-faint); font-size: 11px; }
 
+/*
+ * A club the save has not named yet. Deliberately quiet rather than alarming —
+ * the row's record is real, only the badge is missing, so it should read as a
+ * blank waiting to be filled, not as an error.
+ */
+td.unnamed {
+  color: var(--ink-faint); font-style: italic; font-size: 12px;
+  letter-spacing: 0.01em;
+}
+td.unnamed::after {
+  content: ''; display: inline-block; vertical-align: middle;
+  width: 26px; height: 1px; margin-left: 8px;
+  background: repeating-linear-gradient(90deg, var(--line) 0 3px, transparent 3px 6px);
+}
+
+/* Home or away, in the season list. */
+td.venue {
+  font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em;
+  color: var(--ink-faint); text-align: center;
+}
+
+/* A finished scoreline, tinted by what it was worth. */
+td.res { font-variant-numeric: tabular-nums; font-weight: 750; }
+td.res.r-w { color: var(--up); }
+td.res.r-d { color: var(--ink-dim); }
+td.res.r-l { color: var(--down); }
+
+/* One line of the European round-up: home, score, away. */
+.euro {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: baseline; gap: 8px; padding: 4px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.euro:last-of-type { border-bottom: 0; }
+.euroteam {
+  font-size: 12.5px; color: var(--ink-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.euro .euroteam:first-child { text-align: right; }
+.euroteam.won { color: var(--ink); font-weight: 700; }
+.euroscore {
+  font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 800;
+  color: var(--ink); background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-radius: 999px; padding: 1px 8px; white-space: nowrap;
+}
+
+/* League heading inside the round-up list. */
+h4.subhead {
+  margin: 12px 0 4px; font-size: 11px; font-weight: 800;
+  letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint);
+}
+h4.subhead:first-child { margin-top: 0; }
+
 .devgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
 .devcard {
   position: relative; overflow: hidden;

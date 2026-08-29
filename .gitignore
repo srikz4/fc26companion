@@ -1,15 +1,20 @@
 # dependencies
 node_modules/
 
-# per-machine runtime state: snapshot history, tags, archived saves
-store/
-snapshots/
+# Per-machine runtime state: snapshot history, tags, archived saves.
+#
+# Anchored to the repo root on purpose. Unanchored, `store/` also matches
+# `src/store/`, which quietly kept the whole history-store module out of the
+# repository — a clean clone could not start, because scripts/serve.ts imports
+# it. Keep the leading slash on anything that names a top-level directory.
+/store/
+/snapshots/
 
 # fetched at the user's request, never distributed (see README disclaimers)
-data/faces/
+/data/faces/
 
 # local AI-provider config would hold an API key (planned feature, docs/ai-features.md)
-config/ai.json
+/config/ai.json
 
 # editor and OS noise
 .vscode/
@@ -21,8 +26,8 @@ Desktop.ini
 docs/ai-features.md
 
 # personal save-file exports (DB Browser scratch)
-exports/
+/exports/
 
 # living working notes, local only
 spec.md
-old/
+/old/

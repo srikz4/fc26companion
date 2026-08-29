@@ -134,8 +134,11 @@ carries the explanation of where those numbers came from, for the moments you wa
   not a confident number.
 - Features with nothing behind them say so. AI mode is switched **off and marked unavailable**
   rather than shipping a plausible placeholder.
-- When the game keeps something Companion cannot read — the live league table is the current
-  example — it says exactly that instead of showing an order it cannot stand behind.
+- When the game keeps something Companion cannot read, it says exactly that instead of showing
+  something it cannot stand behind. The league table is the clearest case: the standings are added
+  up from the save's own record of every match played, but the save files those matches by slot
+  rather than by club, and a slot is only named when a results round-up covers one of its games.
+  Rows that have not been named yet read **not yet named** and fill in as the season goes on.
 
 ---
 

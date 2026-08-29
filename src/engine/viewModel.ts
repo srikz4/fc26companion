@@ -31,6 +31,13 @@ import {
   SQUAD_ROLE_LABELS,
 } from '../domain/attributes.ts';
 import { YOUTH_TEAM_ID } from '../core/saveLocation.ts';
+import type { RoundResult, SlotFixture } from '../parser/fixtures.ts';
+import {
+  buildStandings,
+  compForLeague,
+  fixturesForSlot,
+  type SlotAnchor,
+} from './standings.ts';
 import { MODEL, allFits, bestFit, calibrationReport, fitFor, slotOf, type Slot } from './fit.ts';
 import {
   buildSynergy,
@@ -260,12 +267,23 @@ export interface ViewDocument {
   regens: RegenReport;
   wages: WageReport & { assessmentList: { playerId: number; verdict: string; note: string; wage: number | null; peerMedian: number | null }[] };
   stats: StatsView;
-  /** The user's own league table, straight from leagueteamlinks. */
+  /**
+   * The user's own league table.
+   *
+   * Added up from the save's own fixture ledger when that is readable, which is
+   * the only place FC 26 keeps live results; `leagueteamlinks` is the fallback
+   * and, for the user's own division, usually stale.
+   */
   leagueTable: {
     league: string | null;
+    /** 'fixtures' when the rows are results the save recorded; 'links' otherwise. */
+    source: 'fixtures' | 'links';
+    /** How many rows carry a club, and how many rows there are. */
+    named: number;
+    total: number;
     rows: {
-      teamId: number;
-      name: string;
+      teamId: number | null;
+      name: string | null;
       position: number | null;
       prevPosition: number | null;
       movedDivision: 'up' | 'down' | null;
@@ -287,6 +305,26 @@ export interface ViewDocument {
     }[];
     /** False right after a season rolls, before any league match is recorded. */
     started: boolean;
+    /** Our own club's league season, in date order. Empty when unreadable. */
+    ourSeason: {
+      date: number;
+      kickoff: number | null;
+      home: boolean;
+      opponent: string | null;
+      opponentTeamId: number | null;
+      goalsFor: number | null;
+      goalsAgainst: number | null;
+      result: 'W' | 'D' | 'L' | null;
+    }[];
+    /** The most recent round elsewhere in Europe, as the save recorded it. */
+    elsewhere: {
+      date: number;
+      league: string | null;
+      home: string;
+      away: string;
+      homeGoals: number;
+      awayGoals: number;
+    }[];
   };
   /** Who is out, for how long, and who steps in — the game's first screen. */
   treatment: {
@@ -540,6 +578,16 @@ interface BuildInput {
   competitions?: Map<string, string>;
   /** In-game shortlist read from the save's career blob; null when unreadable. */
   shortlist?: { ids: number[]; date: number | null } | null;
+  /**
+   * The fixture ledger read from the career blob, plus every slot a result has
+   * named so far. Null when the calendar is unreadable, in which case the
+   * league table falls back to `leagueteamlinks`.
+   */
+  ledger?: {
+    fixtures: SlotFixture[];
+    results: RoundResult[];
+    anchors: SlotAnchor[];
+  } | null;
 }
 
 export function buildViewDocument(input: BuildInput): ViewDocument {
@@ -1572,9 +1620,105 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
       };
     })
     .sort((a, b) => (a.position ?? 99) - (b.position ?? 99) || b.points - a.points);
+  // --- the real table, added up from the save's own fixture ledger -----------
+  //
+  // `leagueteamlinks` is where a league table ought to live, and for some
+  // divisions it is populated; for the user's own it is last season's leftovers.
+  // The fixture ledger is where FC 26 actually records what happened, so when it
+  // reads, it wins. Slots no result has named yet come through as null rather
+  // than as a guessed club.
+  const ledger = input.ledger ?? null;
+  const linkOf = new Map<number, Row>();
+  for (const l of rowsOf(tables, 'leagueteamlinks')) {
+    const id = num(l, 'teamid');
+    if (id !== null) linkOf.set(id, l);
+  }
+  const divisionOfTeam = (id: number): number | null => {
+    const row = linkOf.get(id);
+    return row ? num(row, 'leagueid') : null;
+  };
+
+  let ledgerRows: ViewDocument['leagueTable']['rows'] | null = null;
+  let ourSeason: ViewDocument['leagueTable']['ourSeason'] = [];
+  let elsewhere: ViewDocument['leagueTable']['elsewhere'] = [];
+
+  if (ledger && userLeagueId !== null) {
+    const comp = compForLeague(ledger.anchors, divisionOfTeam, userLeagueId);
+    const nameSlot = (slot: number): number | null =>
+      ledger.anchors.find((a) => a.comp === comp && a.slot === slot)?.teamId ?? null;
+    if (comp !== null) {
+      const table = buildStandings(ledger.fixtures, comp, nameSlot);
+      if (table.length) {
+        ledgerRows = table.map((r) => {
+          const link = r.teamId === null ? undefined : linkOf.get(r.teamId);
+          const prevLeague = link ? num(link, 'prevleagueid') : null;
+          const thisLeague = link ? num(link, 'leagueid') : null;
+          const moved = prevLeague !== null && thisLeague !== null && prevLeague !== thisLeague;
+          return {
+            teamId: r.teamId,
+            name: r.teamId === null ? null : (teamNames.get(r.teamId) ?? `team ${r.teamId}`),
+            position: r.position,
+            prevPosition: moved || !link ? null : num(link, 'previousyeartableposition'),
+            movedDivision: (moved ? ((prevLeague ?? 0) > (thisLeague ?? 0) ? 'up' : 'down') : null) as
+              | 'up'
+              | 'down'
+              | null,
+            form: link ? num(link, 'teamshortform') : null,
+            formLong: link ? num(link, 'teamlongform') : null,
+            // Straight from the results, so this is league form — unlike
+            // `teamform`, which mixes in cups and friendlies.
+            form5: r.form,
+            lastResult: link ? num(link, 'lastgameresult') : null,
+            played: r.played,
+            wins: r.won,
+            draws: r.drawn,
+            losses: r.lost,
+            gf: r.goalsFor,
+            ga: r.goalsAgainst,
+            gd: r.goalDifference,
+            points: r.points,
+            isUser: r.teamId !== null && r.teamId === clubId,
+            champion: link ? (num(link, 'champion') ?? 0) !== 0 && !moved : false,
+            unbeaten: r.played > 0 && r.lost === 0,
+          };
+        });
+
+        const ourSlot = ledger.anchors.find((a) => a.comp === comp && a.teamId === clubId)?.slot ?? null;
+        if (ourSlot !== null) {
+          ourSeason = fixturesForSlot(ledger.fixtures, comp, ourSlot, nameSlot).map((m) => ({
+            date: m.date,
+            kickoff: m.kickoff,
+            home: m.home,
+            opponent: m.opponentTeamId === null ? null : (teamNames.get(m.opponentTeamId) ?? null),
+            opponentTeamId: m.opponentTeamId,
+            goalsFor: m.goalsFor,
+            goalsAgainst: m.goalsAgainst,
+            result: m.result,
+          }));
+        }
+      }
+    }
+    elsewhere = ledger.results
+      .filter((r) => r.leagueId !== userLeagueId)
+      .map((r) => ({
+        date: r.date,
+        league: leagueNameOf.get(r.leagueId) ?? null,
+        home: teamNames.get(r.homeTeamId) ?? `team ${r.homeTeamId}`,
+        away: teamNames.get(r.awayTeamId) ?? `team ${r.awayTeamId}`,
+        homeGoals: r.homeGoals,
+        awayGoals: r.awayGoals,
+      }));
+  }
+
+  const tableRows = ledgerRows ?? leagueRows;
   const leagueTable = {
     league: leagueNameOf.get(userLeagueId ?? -1) ?? null,
-    rows: leagueRows,
+    source: (ledgerRows ? 'fixtures' : 'links') as 'fixtures' | 'links',
+    named: tableRows.filter((r) => r.teamId !== null).length,
+    total: tableRows.length,
+    rows: tableRows,
+    ourSeason,
+    elsewhere,
     /**
      * Whether THIS league's results are in the save.
      *
@@ -1589,7 +1733,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
      * the table shows them, and when they are not it falls back to what is
      * unquestionably live — position and form — instead of a wall of dashes.
      */
-    started: leagueRows.some((r) => r.played > 0 || r.points > 0),
+    started: tableRows.some((r) => r.played > 0 || r.points > 0),
   };
 
   // --- treatment room: who is out and who steps in ----------------------------

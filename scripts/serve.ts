@@ -15,6 +15,8 @@ import { fileURLToPath } from 'node:url';
 import { loadDbMeta } from '../src/parser/meta.ts';
 import { parseSave, type Tables } from '../src/parser/dbReader.ts';
 import { readShortlist } from '../src/parser/careerBlob.ts';
+import { readFixtureLedger, readLatestResults } from '../src/parser/fixtures.ts';
+import { anchorSlots } from '../src/engine/standings.ts';
 import { HistoryStore, readCareerIdentity } from '../src/store/store.ts';
 import { SaveWatcher } from '../src/watcher/watcher.ts';
 import { listManagerCareerSaves, resolveSaveDirectory } from '../src/core/saveLocation.ts';
@@ -107,6 +109,19 @@ async function main(): Promise<void> {
         (tables['players'] ?? []).map((p) => p['playerid']).filter((v): v is number => typeof v === 'number'),
       );
       const shortlist = readShortlist(bytesAll[0]!, (id) => playerIds.has(id));
+
+      // The fixture ledger: the save's own record of what has been played.
+      // `leagueteamlinks` does not keep the user's league table live; this does.
+      const leagueOfTeam = new Map<number, number>();
+      for (const l of tables['leagueteamlinks'] ?? []) {
+        const t = l['teamid'];
+        const lg = l['leagueid'];
+        if (typeof t === 'number' && typeof lg === 'number') leagueOfTeam.set(t, lg);
+      }
+      const fixtures = readFixtureLedger(bytesAll[0]!);
+      const roundResults = fixtures
+        ? (readLatestResults(bytesAll[0]!, (id) => leagueOfTeam.get(id) ?? null, (id) => playerIds.has(id)) ?? [])
+        : [];
       const resolver = createNameResolver(tables, names, deriveNameIds(parsedAll, names));
 
       // Match the store's career to the save we are rendering, so history and
@@ -117,6 +132,24 @@ async function main(): Promise<void> {
         store.careers()[0];
       activeCareerId = career?.careerId;
 
+      /**
+       * Which club sits in which fixture slot.
+       *
+       * Each matchday's round-up names a handful of slots outright; the rest
+       * stay anonymous until a later round names them. Remembering the ones we
+       * have proved means the table fills in as the season goes rather than
+       * resetting to what this single save happens to show.
+       */
+      let anchors = fixtures ? anchorSlots(fixtures, roundResults) : [];
+      // Slots are reshuffled when a season regenerates the fixture list, so what
+      // we learned last season must not be applied to this one.
+      const seasonCount = (tables['career_users'] ?? [])[0]?.['seasoncount'];
+      const season = typeof seasonCount === 'number' ? seasonCount : null;
+      if (fixtures && activeCareerId !== undefined && season !== null) {
+        store.recordSlotNames(activeCareerId, season, anchors);
+        anchors = store.slotNames(activeCareerId, season);
+      }
+
       view = buildViewDocument({
         tables,
         resolver,
@@ -126,6 +159,7 @@ async function main(): Promise<void> {
         nations,
         competitions,
         shortlist,
+        ledger: fixtures ? { fixtures, results: roundResults, anchors } : null,
       });
 
       // The ledger, written once per thing that happened.
@@ -176,6 +210,7 @@ async function main(): Promise<void> {
               nations,
               competitions,
               shortlist,
+              ledger: fixtures ? { fixtures, results: roundResults, anchors } : null,
             });
           }
         }

@@ -34,7 +34,7 @@ const SETTING_DEFS = [
   { key: 'trendArrows', group: 'Display', label: 'Trend arrows', note: 'Season-form arrows next to each rating change: ▲ surge, ↗ rise, — flat, ↘ dip, ▼ fall.', on: true },
   { key: 'faces', group: 'Display', label: 'Player faces', note: 'Locally imported headshots on rows and cards; off shows initials discs everywhere.', on: true },
   { key: 'treatment', group: 'Central', label: 'Treatment room', note: 'Injured and suspended players with recovery time and a computed stand-in each.', on: true },
-  { key: 'leagueTable', group: 'Central', label: 'League table', note: 'Your division\u2019s live table, straight from the save, your row highlighted.', on: true },
+  { key: 'leagueTable', group: 'Central', label: 'League table', note: 'Your division added up from the save\u2019s own results \u2014 the table, your full fixture list, and the latest round elsewhere in Europe.', on: true },
   { key: 'newsFeed', group: 'Central', label: 'Around the world', note: 'The save\u2019s own event feed — transfers and news across this world.', on: true },
   { key: 'scoutReports', group: 'Guidance', label: 'Scout report verdicts', note: 'Reads the prospects a scout has delivered and calls each one sign, watch or pass. Switch it off to judge the reports yourself in game — the tab disappears entirely and nothing about them is shown.', on: true },
   { key: 'developFocus', group: 'Guidance', label: 'Development focus', note: 'On the player card: the attributes where growth buys the most, from the fit weights and this world\u2019s percentiles. Point the game\u2019s development plans at them.', on: true },
@@ -1419,6 +1419,18 @@ function renderPitch(xi, diff, byId, nameOf) {
 }
 
 /** Matchday: your XI versus the recommended one, plus every shape you own. */
+/**
+ * Who we actually play next, when the fixture ledger names them.
+ *
+ * Before the calendar was decoded the opponent had to be picked by hand. Now
+ * the save knows, so the picker starts on the right club and the manual choice
+ * is only needed while that slot is still unnamed.
+ */
+function ledgerNextOpponent(doc) {
+  const m = (doc.leagueTable?.ourSeason ?? []).find((x) => !x.result && x.opponentTeamId !== null);
+  return m ? m.opponentTeamId : null;
+}
+
 function renderMatchday(doc) {
   const m = doc.matchday;
   const frag = document.createDocumentFragment();
@@ -1523,10 +1535,11 @@ function renderMatchday(doc) {
       panel.appendChild(lchips);
     }
 
+    const chosen = state.oppSel ?? ledgerNextOpponent(doc);
     const chips = el('div', 'chiprow');
     for (const o of doc.opponents.filter((o2) => o2.league === state.oppLeague)) {
       if (o.teamId === doc.club?.id) continue;
-      const chip = el('button', `chip teamchip${state.oppSel === o.teamId ? ' on' : ''}`);
+      const chip = el('button', `chip teamchip${chosen === o.teamId ? ' on' : ''}`);
       chip.appendChild(el('span', null, o.name));
       chip.appendChild(el('i', 'stars5', teamStars(o)));
       chip.dataset.tip = `A ${o.att ?? '—'} · M ${o.mid ?? '—'} · D ${o.def ?? '—'} · GK ${o.gk ?? '—'}`;
@@ -1534,7 +1547,7 @@ function renderMatchday(doc) {
       chips.appendChild(chip);
     }
     panel.appendChild(chips);
-    const opp = doc.opponents.find((o) => o.teamId === state.oppSel);
+    const opp = doc.opponents.find((o) => o.teamId === chosen);
     if (opp && mine) {
       const line = (label, ours, theirs) => {
         const d = ours !== null && theirs !== null ? Math.round((ours - theirs) * 10) / 10 : null;
@@ -4527,12 +4540,20 @@ function renderCentral(doc) {
     panel(colMain, `Season ${doc.season}`, box);
   }
 
+  // A club the save has not yet named. The row is still true — it is the
+  // record of a real team, we just cannot put a badge on it yet. Shared by the
+  // table, the season list and anywhere else a slot surfaces.
+  const UNNAMED_WHY =
+    'The save stores this fixture list by slot, not by club. A slot gets its name the first time a results round-up covers one of its matches, so this row will fill in as the season goes on.';
+
   if (settings.leagueTable && doc.leagueTable?.rows?.length) {
     const lt = doc.leagueTable;
     const box = el('div');
-    // The save keeps position and form live but writes results only at a season
-    // boundary, so the results columns appear only when there is a record to
-    // show. The rest of the season, form is the honest signal.
+    // Two possible sources, and they are not equally good. 'fixtures' means the
+    // rows were added up from the save's own record of every match played, which
+    // is the real table. 'links' is the fallback for when that cannot be read,
+    // and for the user's own division it is usually last season's leftovers.
+    const fromLedger = lt.source === 'fixtures';
     // `lastgameresult` is inverted against teamform's digits: 0 win, 2 loss.
     const RESULT = { 0: ['W', 'up'], 1: ['D', 'flat'], 2: ['L', 'down'] };
     const formRun = (r) => {
@@ -4545,11 +4566,11 @@ function renderCentral(doc) {
         node: box2,
         text: r.form5.join(''),
         sort: r.form,
-        title:
-          `Last five matches in all competitions, oldest first — ${r.form5.join(' ')}. ` +
-          `That is ${Math.round(((r.form ?? 0) / 100) * 15)} points from five` +
-          `${r.formLong !== null ? `, against ${r.formLong}/100 over the longer run — ${(r.formLong ?? 0) > (r.form ?? 0) ? 'they are falling off' : 'they are picking up'}` : ''}. ` +
-          `These are form points, not league points: the save does not carry a season total.`,
+        title: fromLedger
+          ? `Last five league matches, oldest first — ${r.form5.join(' ')}. Read off the results themselves, so this is the league alone: cups and friendlies are not in it.`
+          : `Last five matches in all competitions, oldest first — ${r.form5.join(' ')}. ` +
+            `That is ${Math.round(((r.form ?? 0) / 100) * 15)} points from five` +
+            `${r.formLong !== null ? `, against ${r.formLong}/100 over the longer run — ${(r.formLong ?? 0) > (r.form ?? 0) ? 'they are falling off' : 'they are picking up'}` : ''}.`,
       };
     };
     const formCell = (r) => {
@@ -4614,7 +4635,10 @@ function renderCentral(doc) {
                   sort: String(move),
                   title: `Finished ${ordinal(r.prevPosition)} last season`,
                 };
-          const nameCell = { text: r.name, cls: you || undefined };
+          const nameCell =
+            r.name === null
+              ? { text: 'not yet named', cls: 'unnamed', sort: '￿', title: UNNAMED_WHY }
+              : { text: r.name, cls: you || undefined };
           return lt.started
             ? [
                 { text: rank, num: true, cls: you || undefined },
@@ -4641,11 +4665,91 @@ function renderCentral(doc) {
       ),
     );
     box.appendChild(
-      el('p', 'muted tiny', lt.started
-        ? 'Arrows compare today\u2019s order with where each club finished last season.'
-        : 'The standings are not in the save, but every club’s last five results are — the game stores them as a five-digit code, decoded here and verified against its own form rating for all 842 clubs. These cover all competitions, not the league alone, so they will not always add up to a league record. Ordered by form. The moment a real table appears in the file, it takes this one’s place.'),
+      el('p', 'muted tiny', !lt.started
+        ? 'No league match has been played yet this season, so there is nothing to add up.'
+        : fromLedger
+          ? `Added up from every result the save has recorded${lt.named < lt.total ? `. ${lt.total - lt.named} of ${lt.total} clubs are still unnamed \u2014 the save files fixtures by slot, and names a slot only when a results round-up covers one of its matches` : ''}. Arrows compare today\u2019s order with where each club finished last season.`
+          : 'Taken from the club records in the save. Arrows compare today\u2019s order with where each club finished last season.'),
     );
-    panel(colMain, lt.started ? `${lt.league ?? 'League table'}` : `${lt.league ?? 'Your division'} — by form`, box);
+    panel(colMain, lt.league ?? 'League table', box);
+  }
+
+  // Our own league season: what has been played, and what comes next.
+  if (settings.leagueTable && doc.leagueTable?.ourSeason?.length) {
+    const season = doc.leagueTable.ourSeason;
+    const lastPlayed = season.reduce((n, m, i) => (m.result ? i : n), -1);
+    const from = Math.max(0, lastPlayed - 2);
+    const around = season.slice(from, lastPlayed + 7);
+    const box = el('div');
+    box.appendChild(
+      table(
+        [
+          { label: 'Date', always: true },
+          { label: '', always: true },
+          { label: 'Opponent', always: true },
+          { label: 'Score', always: true },
+        ],
+        around.map((m, i) => {
+          const next = !m.result && from + i === lastPlayed + 1;
+          const you = next ? 'you' : undefined;
+          return [
+            { text: fmtDate(m.date), cls: you },
+            { text: m.home ? 'H' : 'A', cls: 'venue', title: m.home ? 'At home' : 'Away' },
+            m.opponent === null
+              ? { text: 'not yet named', cls: 'unnamed', title: UNNAMED_WHY }
+              : { text: m.opponent, cls: you },
+            m.result
+              ? {
+                  text: `${m.goalsFor}\u2013${m.goalsAgainst}`,
+                  cls: `res r-${m.result.toLowerCase()}`,
+                  sort: m.goalsFor - m.goalsAgainst,
+                }
+              : { text: next ? 'next up' : 'to play', cls: next ? 'you' : 'muted' },
+          ];
+        }),
+        { tight: true },
+      ),
+    );
+    box.appendChild(
+      el(
+        'p',
+        'muted tiny',
+        `${season.filter((m) => m.result).length} of ${season.length} league matches played. The whole season is written out months ahead, so a date this far out can still move.`,
+      ),
+    );
+    panel(colMain, 'Your league season', box);
+  }
+
+  // The rest of Europe's latest round, exactly as the save recorded it.
+  if (settings.leagueTable && doc.leagueTable?.elsewhere?.length) {
+    const box = el('div');
+    const byLeague = new Map();
+    for (const r of doc.leagueTable.elsewhere) {
+      const key = r.league ?? 'Elsewhere';
+      if (!byLeague.has(key)) byLeague.set(key, []);
+      byLeague.get(key).push(r);
+    }
+    for (const [league, list] of byLeague) {
+      box.appendChild(el('h4', 'subhead', league));
+      for (const r of list) {
+        // A results feed reads best as home, score, away on one line, with the
+        // side that won carrying the weight.
+        const verdict = r.homeGoals === r.awayGoals ? 'd' : r.homeGoals > r.awayGoals ? 'h' : 'a';
+        const line = el('div', 'euro');
+        line.appendChild(el('span', `euroteam${verdict === 'h' ? ' won' : ''}`, r.home));
+        line.appendChild(el('b', 'euroscore', `${r.homeGoals}\u2013${r.awayGoals}`));
+        line.appendChild(el('span', `euroteam${verdict === 'a' ? ' won' : ''}`, r.away));
+        box.appendChild(line);
+      }
+    }
+    box.appendChild(
+      el(
+        'p',
+        'muted tiny',
+        'The round-up the game writes after a matchday: the headline leagues, latest round only. It names real clubs, which is how the slots in your own table earn their names.',
+      ),
+    );
+    panel(colSide, 'Around Europe', box);
   }
 
   {
@@ -4728,7 +4832,8 @@ function renderCentral(doc) {
   {
     const box = el('div');
     const mine = doc.opponents?.find((o) => o.teamId === doc.club?.id);
-    const opp = doc.opponents?.find((o) => o.teamId === state.oppSel);
+    const chosen = state.oppSel ?? ledgerNextOpponent(doc);
+    const opp = doc.opponents?.find((o) => o.teamId === chosen);
     if (opp && mine) {
       const row = el('div', 'hero-line');
       for (const [l2, a, b] of [['XI', mine.overall, opp.overall], ['DEF', mine.def, opp.def], ['MID', mine.mid, opp.mid], ['ATT', mine.att, opp.att]]) {
@@ -4737,10 +4842,24 @@ function renderCentral(doc) {
         cell.appendChild(el('i', null, l2));
         row.appendChild(cell);
       }
-      box.appendChild(el('p', 'muted tiny', `Your edge, line by line, v ${opp.name}.`));
+      box.appendChild(
+        el(
+          'p',
+          'muted tiny',
+          state.oppSel === null
+            ? `Your edge, line by line, v ${opp.name} \u2014 your next league match, from the save's own fixture list.`
+            : `Your edge, line by line, v ${opp.name}.`,
+        ),
+      );
       box.appendChild(row);
     } else {
-      box.appendChild(el('p', 'muted tiny', 'Pick your next opponent under Squad › Team Management and the line-by-line edge lands here.'));
+      box.appendChild(
+        el(
+          'p',
+          'muted tiny',
+          "Your next opponent's slot in the fixture list has not been named yet. Pick them under Squad \u203a Team Management and the line-by-line edge lands here.",
+        ),
+      );
     }
     box.appendChild(go('squad', 'tactics'));
     panel(colSide, settings.rpg ? '⚔ Next fixture' : '🔎 Opponent', box);
