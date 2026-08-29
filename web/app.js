@@ -4554,8 +4554,6 @@ function renderCentral(doc) {
     // is the real table. 'links' is the fallback for when that cannot be read,
     // and for the user's own division it is usually last season's leftovers.
     const fromLedger = lt.source === 'fixtures';
-    // `lastgameresult` is inverted against teamform's digits: 0 win, 2 loss.
-    const RESULT = { 0: ['W', 'up'], 1: ['D', 'flat'], 2: ['L', 'down'] };
     const formRun = (r) => {
       if (!r.form5?.length) return { text: '—' };
       const box2 = el('span', 'formrun');
