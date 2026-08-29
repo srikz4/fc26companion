@@ -41,7 +41,7 @@ const SETTING_DEFS = [
   { key: 'absurd', group: 'Guidance', label: 'The absurd bit', note: 'The cheeky lines on the Story card.', on: true },
   { key: 'compact', group: 'Preferences', label: 'Compact density', note: 'Tighter paddings and smaller type everywhere — more career per screen.', on: false },
   { key: 'fullMoney', group: 'Preferences', label: 'Full money figures', note: 'Show 12,500,000 instead of 12.5M wherever money appears shortened.', on: false },
-  { key: 'rpg', group: 'Modes', label: 'RPG mode', note: 'Career-as-campaign: live challenges computed from your save, with progress. Deterministic — every number is real.', on: false },
+  { key: 'rpg', group: 'Modes', label: 'RPG mode', note: 'Career-as-campaign: milestones, season missions and one-save-away marks, all computed from your save — deterministic, nothing rolled. Its home is Story › Campaign, and with it on, each mission also appears at the top of the view where that work happens.', on: false },
   { key: 'ai', group: 'Modes', label: 'AI mode', note: 'Narration and insight on top of the recorded facts. Nothing is wired yet — no provider, no key, no prompt — so the switch stays off rather than pretending. It turns on when there is something behind it.', on: false, disabled: true },
 ];
 /** Landing tab: where a fresh open of Companion starts. */
@@ -2870,7 +2870,7 @@ function renderStats(doc) {
     const maxD = Math.max(1, ...s2.biggestRisers.map((r) => Math.abs(r.delta)));
     grid.appendChild(
       panel(
-        '📈 Season growth',
+        'Season growth',
         bars(s2.biggestRisers.map((r) => barRow(r.name, r.delta, maxD, r.delta > 0 ? 90 : 60, ''))),
       ),
     );
@@ -3143,7 +3143,7 @@ function renderSellValues(doc) {
   const frag = document.createDocumentFragment();
   const sv = doc.sellValues;
   const panel = el('div', 'panel');
-  panel.appendChild(el('h2', null, '💰 Sell values'));
+  panel.appendChild(el('h2', null, 'Sell values'));
   panel.appendChild(
     el(
       'p',
@@ -3257,14 +3257,14 @@ function renderBoard(doc) {
 
   if (comps.length) {
     const panel = el('div', 'panel');
-    panel.appendChild(el('h2', null, '🏆 This season\u2019s competitions'));
+    panel.appendChild(el('h2', null, 'This season\u2019s competitions'));
     const grid = el('div', 'compgrid');
     for (const c of comps) {
       const state2 = c.won ? 'won' : c.notStarted ? 'idle' : c.result === 1 ? 'met' : 'live';
       const box = el('div', `compcard ${state2}`);
       box.appendChild(el('b', 'compname', c.name));
       const pill = el('span', `comppill ${state2}`);
-      pill.textContent = c.won ? '🏆 Won' : c.notStarted ? 'Not started' : c.result === 1 ? 'Objective met' : 'In progress';
+      pill.textContent = c.won ? 'Won' : c.notStarted ? 'Not started' : c.result === 1 ? 'Objective met' : 'In progress';
       box.appendChild(pill);
       grid.appendChild(box);
     }
@@ -3289,7 +3289,7 @@ function renderBoard(doc) {
   if (doc.board.competitions.length) {
     const outcomeOf = (c) =>
       c.won
-        ? '🏆 Won'
+        ? 'Won'
         : c.result === 1
           ? 'Objective met'
           : c.result === -1
@@ -3358,10 +3358,9 @@ function renderManagerOffice(doc) {
       fill.style.height = `${Math.max(6, Math.round(((sn.points ?? 0) / maxPts) * 100))}%`;
       bar.appendChild(fill);
       const trophies = sn.leagueTrophies + sn.cupTrophies;
-      if (trophies) {
-        const mark = el('span', 'tltrophy', '🏆'.repeat(Math.min(3, trophies)));
-        col.appendChild(mark);
-      }
+      const mark = el('span', 'tltrophy');
+      for (let i = 0; i < Math.min(3, trophies); i++) mark.appendChild(el('i', 'tpip'));
+      col.appendChild(mark);
       col.appendChild(bar);
       col.appendChild(el('b', 'tlpts', String(sn.points ?? '—')));
       col.appendChild(el('span', 'tlpos', sn.position && sn.position > 0 ? ordinal(sn.position) : 'live'));
@@ -3419,8 +3418,8 @@ function renderManagerOffice(doc) {
           : null,
         season.position !== null ? `P${season.position}` : null,
         season.goalsFor !== null ? `${season.goalsFor}:${season.goalsAgainst}` : null,
-        season.leagueTrophies ? `🏆×${season.leagueTrophies}` : null,
-        season.cupTrophies ? `🏅×${season.cupTrophies}` : null,
+        season.leagueTrophies ? `${season.leagueTrophies} league title${season.leagueTrophies > 1 ? 's' : ''}` : null,
+        season.cupTrophies ? `${season.cupTrophies} cup${season.cupTrophies > 1 ? 's' : ''}` : null,
         season.bigBuy ? `in: ${season.bigBuy.name} ${moneyShort(season.bigBuy.amount)}` : null,
         season.bigSell ? `out: ${season.bigSell.name} ${moneyShort(season.bigSell.amount)}` : null,
       ].filter(Boolean);
@@ -3506,68 +3505,188 @@ function renderManagerMarket(doc) {
 }
 
 /** Finances: what the save actually persists, labelled where it does not. */
+/**
+ * Finances.
+ *
+ * The club's balance sheet as the save actually keeps it: what the squad is
+ * worth against what it costs, where the money sits, and the standing that
+ * decides who will talk to you. Budgets are the one thing FC 26 does not write
+ * to disk, and that is said once rather than printed as four zeroes.
+ */
 function renderFinances(doc) {
   const frag = document.createDocumentFragment();
   const f = doc.finances ?? {};
-  const grid = el('div', 'grid');
-  const panel = (title, node, note) => {
-    const p2 = el('div', 'panel');
-    p2.appendChild(el('h2', null, title));
-    p2.appendChild(node);
-    if (note) p2.appendChild(el('p', 'muted tiny', note));
-    grid.appendChild(p2);
-  };
-  const val = (v) => ({ text: v !== null && v !== undefined ? money(v) : 'not persisted', num: true });
-  panel(
-    '🏦 Budgets',
-    table(
-      ['Measure', { label: 'Value', num: true }],
-      [
-        ['Transfer budget', val(f.transferBudget)],
-        ['Wage budget', val(f.wageBudget)],
-        ['Start-of-season transfer budget', val(f.startTransferBudget)],
-        ['Start-of-season wage budget', val(f.startWageBudget)],
-      ],
-    ),
-    'The game keeps live budgets in memory and writes zeros to disk (verified across saves) — "not persisted" is the honest reading, never a claim that you are broke.',
-  );
+  const sv = doc.sellValues?.rows ?? [];
+  const squadValue = sv.reduce((a, r) => a + (r.ea?.value ?? 0), 0);
+  const annualWages = (f.wageBill ?? 0) * 52;
+
+  // --- the headline
   {
-    const box = el('div');
-    box.appendChild(
-      table(
-        ['Measure', { label: 'Value', num: true }],
-        [
-          ['Club worth', val(f.clubWorth)],
-          ['Weekly wage bill', { text: money(f.wageBill ?? 0), num: true }],
-        ],
-      ),
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, 'The balance'));
+    panel.appendChild(
+      tileRow([
+        ['Squad value ~', squadValue ? moneyShort(squadValue) : null, 'Every senior player at his EA-style fair value, added up.'],
+        ['Club worth', f.clubWorth ? moneyShort(f.clubWorth) : null, 'The value the save records for the club itself.'],
+        ['Wage bill', moneyShort(f.wageBill ?? 0), 'Per week, across everyone with a recorded wage.'],
+        ['A year of wages', annualWages ? moneyShort(annualWages) : null],
+        ['Your wage', f.managerWage ? moneyShort(f.managerWage) : null],
+        ['Career earnings', f.totalEarnings ? moneyShort(f.totalEarnings) : null],
+      ]),
     );
-    const bars = el('div', 'bars');
+    panel.appendChild(
+      el('p', 'muted tiny', 'Squad value is derived (~) from the valuation curves; club worth and the wage bill are read straight from the save.'),
+    );
+    frag.appendChild(panel);
+  }
+
+  const cols = el('div', 'grid');
+
+  // --- where the money is: the wage bill by role band, and the biggest assets
+  {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, 'Where the wages go'));
+    const bands = doc.wages?.bands ?? [];
+    const total = bands.reduce((a, b) => a + b.median * b.count, 0) || 1;
+    if (bands.length) {
+      const bar = el('div', 'stackbar');
+      const TONE = ['t4', 't3', 't2', 't1', 'flat'];
+      bands.forEach((b, i) => {
+        const seg = el('i', `stackseg ${TONE[i % TONE.length]}`);
+        seg.style.width = `${Math.max(1, ((b.median * b.count) / total) * 100)}%`;
+        seg.dataset.tip = `${b.role}: ${b.count} player${b.count === 1 ? '' : 's'}, median ${money(b.median)} — about ${moneyShort(b.median * b.count)} of the weekly bill.`;
+        bar.appendChild(seg);
+      });
+      panel.appendChild(bar);
+      const key = el('div', 'chipwrap');
+      bands.forEach((b, i) => {
+        const chip = el('span', `bandkey ${TONE[i % TONE.length]}`);
+        chip.appendChild(el('i', 'bandswatch'));
+        chip.append(`${b.role} ×${b.count}`);
+        chip.dataset.tip = `Median ${money(b.median)}, from ${money(b.low)} to ${money(b.high)}.`;
+        key.appendChild(chip);
+      });
+      panel.appendChild(key);
+    }
+    const top = [...(doc.senior ?? [])].sort((a, b) => (b.wage ?? 0) - (a.wage ?? 0)).slice(0, 5);
+    if (top.length) {
+      const bars = el('div', 'gbars');
+      const max = Math.max(...top.map((p2) => p2.wage ?? 0), 1);
+      for (const p2 of top) {
+        const row = el('div', 'gbar');
+        row.appendChild(el('span', 'gbname', p2.name.split(' ').pop()));
+        const track = el('div', 'btrack');
+        const fill = el('div', 'bfill t3');
+        fill.style.width = `${Math.max(4, Math.round(((p2.wage ?? 0) / max) * 100))}%`;
+        track.appendChild(fill);
+        row.appendChild(track);
+        const v = el('span', 'gbval');
+        v.appendChild(el('b', null, moneyShort(p2.wage)));
+        row.appendChild(v);
+        row.dataset.tip = `${p2.name} — ${((p2.wage ?? 0) / Math.max(1, f.wageBill ?? 1) * 100).toFixed(1)}% of the weekly bill.`;
+        bars.appendChild(row);
+      }
+      panel.appendChild(cardSection('THE FIVE BIGGEST EARNERS', bars));
+    }
+    cols.appendChild(panel);
+  }
+
+  // --- the standing that decides who talks to you
+  {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, 'Standing'));
+    const bars = el('div', 'gbars');
     const scale = (label, v, tip) => {
       if (v === null || v === undefined) return;
-      const row = barRow(label, v, 10, v * 10);
-      if (tip) row.dataset.tip = tip;
+      const row = el('div', 'gbar');
+      row.appendChild(el('span', 'gbname', label));
+      const track = el('div', 'btrack');
+      const fill = el('div', `bfill ${v >= 8 ? 't4' : v >= 6 ? 't3' : v >= 4 ? 't2' : 't1'}`);
+      fill.style.width = `${v * 10}%`;
+      track.appendChild(fill);
+      row.appendChild(track);
+      const val = el('span', 'gbval');
+      val.appendChild(el('b', null, `${v}/10`));
+      row.appendChild(val);
+      row.dataset.tip = tip;
       bars.appendChild(row);
     };
-    scale('Profitability', f.profitability, 'The game\u2019s own 1–10 scale.');
-    scale('Domestic prestige', f.domesticPrestige, 'How the country sees the club, 1–10.');
-    scale('International prestige', f.internationalPrestige, 'How the world sees the club, 1–10.');
-    scale('Youth development', f.youthDevelopment, 'The facility scale that shapes what the academy produces, 1–10.');
-    box.appendChild(bars);
-    panel('💼 The club', box);
+    scale('Domestic prestige', f.domesticPrestige, 'How the country sees the club. It shapes who will consider a move here.');
+    scale('International prestige', f.internationalPrestige, 'How the world sees the club — the number that matters for foreign signings.');
+    scale('Profitability', f.profitability, 'The board\u2019s own read on how the club is trading.');
+    scale('Youth development', f.youthDevelopment, 'The facility rating that shapes what your academy produces. Raising it is a long game with the largest payoff in this app.');
+    panel.appendChild(bars);
+    if (f.financialStrictness !== null && f.financialStrictness !== undefined) {
+      panel.appendChild(
+        el('p', 'muted tiny', `Board financial strictness: ${f.financialStrictness}. Higher means less patience with a wage bill that outruns the results.`),
+      );
+    }
+    cols.appendChild(panel);
   }
-  panel(
-    '🧑‍💼 You',
-    table(
-      ['Measure', { label: 'Value', num: true }],
-      [
-        ['Your wage', val(f.managerWage)],
-        ['Career earnings', val(f.totalEarnings)],
-        ['Board financial strictness', { text: f.financialStrictness ?? '—', num: true }],
-      ],
-    ),
-  );
-  frag.appendChild(grid);
+
+  // --- the biggest things you own
+  {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, 'Your biggest assets'));
+    const top = sv.filter((r) => r.ea).slice(0, 6);
+    if (top.length) {
+      panel.appendChild(
+        table(
+          ['Player', { label: 'Age', num: true }, { label: 'Wage', num: true }, { label: 'Worth ~', num: true }, { label: 'Years of his wage', num: true }],
+          top.map((r) => {
+            const years = r.wage && r.ea ? r.ea.value / (r.wage * 52) : null;
+            return [
+              r.name,
+              { text: r.age ?? '—', num: true },
+              { node: moneyCell(r.wage, 'wk'), text: r.wage ?? '', num: true, sort: r.wage ?? 0 },
+              { node: valuationCell(r.ea), text: r.ea?.value ?? '', num: true, sort: r.ea?.value ?? 0 },
+              {
+                text: years === null ? '—' : `${years.toFixed(1)}y`,
+                num: true,
+                title: years === null ? undefined : `Selling him would cover about ${years.toFixed(1)} years of what he is paid.`,
+              },
+            ];
+          }),
+          { tight: true },
+        ),
+      );
+    } else {
+      panel.appendChild(el('p', 'muted tiny', 'No valuations yet.'));
+    }
+    cols.appendChild(panel);
+  }
+
+  // --- budgets, said once
+  {
+    const panel = el('div', 'panel');
+    panel.appendChild(el('h2', null, 'Budgets'));
+    const known = [f.transferBudget, f.wageBudget, f.startTransferBudget, f.startWageBudget].some(
+      (v) => v !== null && v !== undefined,
+    );
+    if (known) {
+      panel.appendChild(
+        table(
+          ['Measure', { label: 'Value', num: true }],
+          [
+            ['Transfer budget', { text: money(f.transferBudget) ?? '—', num: true }],
+            ['Wage budget', { text: money(f.wageBudget) ?? '—', num: true }],
+            ['Start-of-season transfer budget', { text: money(f.startTransferBudget) ?? '—', num: true }],
+            ['Start-of-season wage budget', { text: money(f.startWageBudget) ?? '—', num: true }],
+          ],
+        ),
+      );
+    } else {
+      panel.appendChild(
+        el('p', 'muted', 'FC 26 keeps the live budgets in memory and writes zeroes to the save — verified across every save Companion has read. Rather than print four zeroes as though you were broke, Companion says nothing and leaves the budget where it is knowable: on the game\u2019s own transfer screen.'),
+      );
+      panel.appendChild(
+        el('p', 'muted tiny', 'If a save ever does carry them, this panel fills itself in.'),
+      );
+    }
+    cols.appendChild(panel);
+  }
+
+  frag.appendChild(cols);
   return frag;
 }
 
@@ -3717,7 +3836,7 @@ function storySvg(doc) {
     y += 42;
     for (const tr of f.trophies.slice(0, 4)) {
       seg(64, y, 28, [
-        { t: '🏆 ', fill: ACCENT },
+        { t: '— ', fill: ACCENT, w: 800 },
         { t: tr.name, fill: INK, w: 800 },
         { t: `  season ${tr.season}`, fill: DIM, w: 600 },
       ]);
@@ -3746,7 +3865,7 @@ function storySvg(doc) {
     const posFill = champion ? ACCENT : sn.position === 2 ? '#cbd5e1' : sn.position === 3 ? '#d9a05b' : DIM;
     seg(64, y, 30, [
       { t: `S${sn.season}`, fill: ACCENT, w: 800 },
-      { t: champion ? '  🏆 CHAMPIONS' : pos ? `  ${pos}` : '  live', fill: posFill, w: 800, dx: 6 },
+      { t: champion ? '  CHAMPIONS' : pos ? `  ${pos}` : '  live', fill: posFill, w: 800, dx: 6 },
       { t: `  ${sn.wins}W`, fill: GREEN, w: 800, dx: 18 },
       { t: ` ${sn.draws}D`, fill: DIM, w: 700 },
       { t: ` ${sn.losses}L`, fill: RED, w: 800 },
@@ -3781,11 +3900,13 @@ function storySvg(doc) {
 
   // Wonderkids + market
   const lines = [];
-  if (f.riser && f.riser.delta > 0) lines.push(`📈 ${f.riser.name} grew +${f.riser.delta} overall this season — the sharpest riser in the squad.`);
-  if (f.jewel && f.jewel.potential !== null) lines.push(`💎 Academy jewel: ${f.jewel.name}, ${f.jewel.age}y, ceiling ${f.jewel.potential}.`);
-  if (f.sale) lines.push(`💰 Biggest sale: ${f.sale.name} for ${moneyShort(f.sale.amount)}.`);
-  if (f.buy) lines.push(`🖊 Biggest signing: ${f.buy.name} at ${moneyShort(f.buy.amount)}.`);
-  if (f.captain) lines.push(`Ⓒ ${f.captain.name} wears the armband.`);
+  // No emoji on the card: it is an exported image, and a row of pictographs is
+  // exactly what makes something look machine-made.
+  if (f.riser && f.riser.delta > 0) lines.push(`Sharpest riser — ${f.riser.name}, +${f.riser.delta} overall this season.`);
+  if (f.jewel && f.jewel.potential !== null) lines.push(`Academy jewel — ${f.jewel.name}, ${f.jewel.age}, ceiling ${f.jewel.potential}.`);
+  if (f.sale) lines.push(`Biggest sale — ${f.sale.name} for ${moneyShort(f.sale.amount)}.`);
+  if (f.buy) lines.push(`Biggest signing — ${f.buy.name} at ${moneyShort(f.buy.amount)}.`);
+  if (f.captain) lines.push(`${f.captain.name} wears the armband.`);
   for (const line of lines.slice(0, 4)) {
     t(64, y, line, 26, INK, 500);
     y += 42;
@@ -3814,17 +3935,17 @@ function storySvg(doc) {
 /** Social caption: plain text for pasting next to the image. */
 function storyCaption(doc) {
   const f = bragFacts(doc);
-  const out = [`${doc.club?.name ?? 'Career'} — season ${doc.season} ⚽`];
-  if (f.cur) out.push(`📊 ${f.cur.wins}W ${f.cur.draws}D ${f.cur.losses}L · ${f.cur.goalsFor}:${f.cur.goalsAgainst}`);
-  for (const tr of f.trophies.slice(0, 3)) out.push(`🏆 ${tr.name}`);
-  if (f.scorer) out.push(`⚽ ${f.scorer.name} — ${f.scorer.goals} goals`);
-  if (f.rated) out.push(`⭐ ${f.rated.name} — ${f.rated.rating.toFixed(1)} avg rating`);
-  if (f.sale) out.push(`💰 sold ${f.sale.name} for ${moneyShort(f.sale.amount)}`);
+  const out = [`${doc.club?.name ?? 'Career'} — season ${doc.season}`];
+  if (f.cur) out.push(`${f.cur.wins}W ${f.cur.draws}D ${f.cur.losses}L · ${f.cur.goalsFor}:${f.cur.goalsAgainst}`);
+  for (const tr of f.trophies.slice(0, 3)) out.push(`Won the ${tr.name}`);
+  if (f.scorer) out.push(`${f.scorer.name} — ${f.scorer.goals} goals`);
+  if (f.rated) out.push(`${f.rated.name} — ${f.rated.rating.toFixed(1)} average rating`);
+  if (f.sale) out.push(`Sold ${f.sale.name} for ${moneyShort(f.sale.amount)}`);
   if (doc.board?.bigWin && doc.board.bigWin.userScore - doc.board.bigWin.oppScore >= 5) {
-    out.push(`💥 biggest win ${doc.board.bigWin.userScore}–${doc.board.bigWin.oppScore} v ${doc.board.bigWin.opponent}`);
+    out.push(`Biggest win ${doc.board.bigWin.userScore}–${doc.board.bigWin.oppScore} v ${doc.board.bigWin.opponent}`);
   }
   if (f.absurd.length) out.push(f.absurd[0]);
-  out.push('📟 tracked on Companion — the second screen reading the save itself');
+  out.push('Tracked on Companion — the second screen that reads the save itself');
   out.push('#FC26 #CareerMode');
   return out.join(String.fromCharCode(10));
 }
@@ -4403,7 +4524,7 @@ function renderCentral(doc) {
       }
       box.appendChild(wdl);
     }
-    panel(colMain, `📈 Season ${doc.season}`, box);
+    panel(colMain, `Season ${doc.season}`, box);
   }
 
   if (settings.leagueTable && doc.leagueTable?.rows?.length) {
@@ -4412,7 +4533,21 @@ function renderCentral(doc) {
     // The save keeps position and form live but writes results only at a season
     // boundary, so the results columns appear only when there is a record to
     // show. The rest of the season, form is the honest signal.
-    const RESULT = { 0: ['L', 'down'], 1: ['D', 'flat'], 2: ['W', 'up'] };
+    // `lastgameresult` is inverted against teamform's digits: 0 win, 2 loss.
+    const RESULT = { 0: ['W', 'up'], 1: ['D', 'flat'], 2: ['L', 'down'] };
+    const formRun = (r) => {
+      if (!r.form5?.length) return { text: '—' };
+      const box2 = el('span', 'formrun');
+      r.form5.forEach((res, i) => {
+        box2.appendChild(el('i', `fpip f-${res.toLowerCase()}${i === r.form5.length - 1 ? ' newest' : ''}`, res));
+      });
+      return {
+        node: box2,
+        text: r.form5.join(''),
+        sort: r.form,
+        title: `Last five matches in all competitions, oldest first — ${r.form5.join(' ')}. Form rating ${r.form}/100, which is exactly what those five are worth in points${r.formLong !== null ? `; ${r.formLong} over the longer run` : ''}.`,
+      };
+    };
     const formCell = (r) => {
       if (r.form === null) return { text: '—' };
       const box2 = el('span', 'formcell');
@@ -4452,8 +4587,8 @@ function renderCentral(doc) {
               { label: '', always: true },
               { label: '', always: true },
               { label: 'Club', always: true },
+              { label: 'Last five', always: true },
               { label: 'Form', num: true, always: true },
-              { label: 'Last', always: true },
             ],
         (lt.started ? lt.rows : [...lt.rows].sort((a, b) => (b.form ?? -1) - (a.form ?? -1))).map((r, i) => {
           const you = r.isUser ? 'you' : '';
@@ -4476,7 +4611,6 @@ function renderCentral(doc) {
                   title: `Finished ${ordinal(r.prevPosition)} last season`,
                 };
           const nameCell = { text: r.name, cls: you || undefined };
-          const last = r.lastResult !== null ? RESULT[r.lastResult] : null;
           return lt.started
             ? [
                 { text: rank, num: true, cls: you || undefined },
@@ -4495,10 +4629,8 @@ function renderCentral(doc) {
                 { text: '', cls: you || undefined },
                 { text: '', cls: you || undefined },
                 nameCell,
+                { ...formRun(r), cls: you || undefined },
                 { ...formCell(r), cls: you || undefined },
-                last
-                  ? { node: el('span', `lastres ${last[1]}`, last[0]), text: last[0], sort: r.lastResult }
-                  : { text: '—' },
               ];
         }),
         { tight: true },
@@ -4507,7 +4639,7 @@ function renderCentral(doc) {
     box.appendChild(
       el('p', 'muted tiny', lt.started
         ? 'Arrows compare today\u2019s order with where each club finished last season.'
-        : 'The live table is not in the save — the game keeps it, but not in a form Companion has decoded yet, and the position field it does write does not match what the game shows. Rather than print an order that is wrong, this lists the division by the game’s own recent-form rating, which IS live. Your own record sits above, and it is exact.'),
+        : 'The standings are not in the save, but every club’s last five results are — the game stores them as a five-digit code, decoded here and verified against its own form rating for all 842 clubs. These cover all competitions, not the league alone, so they will not always add up to a league record. Ordered by form. The moment a real table appears in the file, it takes this one’s place.'),
     );
     panel(colMain, lt.started ? `${lt.league ?? 'League table'}` : `${lt.league ?? 'Your division'} — by form`, box);
   }
@@ -4517,10 +4649,10 @@ function renderCentral(doc) {
     if (comps.length) {
       const box = el('div');
       for (const c of comps) {
-        todoRow(box, c.name, c.won ? '🏆 Won' : c.notStarted ? 'Not started yet' : c.result === 1 ? 'Objective met' : 'In progress', '');
+        todoRow(box, c.name, c.won ? 'Won' : c.notStarted ? 'Not started yet' : c.result === 1 ? 'Objective met' : 'In progress', '');
       }
       box.appendChild(el('p', 'muted tiny', 'Cup brackets and group tables are not written to the save (verified) — progress and outcomes are.'));
-      panel(colMain, '🏆 Competitions', box);
+      panel(colMain, 'Competitions', box);
     }
   }
 
