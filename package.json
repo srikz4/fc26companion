@@ -37,7 +37,8 @@
     "backfill:fixtures": "tsx scripts/backfillFixtures.ts",
     "experiment:baseline": "tsx scripts/decodeExperiment.ts baseline",
     "experiment:diff": "tsx scripts/decodeExperiment.ts diff",
-    "experiment:stats": "tsx scripts/statsDiff.ts"
+    "experiment:stats": "tsx scripts/statsDiff.ts",
+    "make:icon": "tsx scripts/makeIcon.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

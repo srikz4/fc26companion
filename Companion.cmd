@@ -7,7 +7,7 @@ rem  - Otherwise it starts the server minimised and opens the page when ready.
 rem  - Phone access (same Wi-Fi) is on by default because the app is a second
 rem    screen; pass --local to keep it loopback-only:  Companion.cmd --local
 rem
-rem Make a desktop shortcut: right-click this file > Send to > Desktop.
+rem Desktop shortcut with the proper icon: run "Create Desktop Shortcut.vbs".
 rem ============================================================================
 setlocal
 cd /d "%~dp0"

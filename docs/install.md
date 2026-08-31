@@ -29,7 +29,7 @@ once per machine.
 
 4. **Phone (optional).** The server window (minimised in the taskbar) prints
    `on your phone http://<ip>:4126`. Open that address on any phone on the same Wi-Fi.
-   Don't want phone access? Make your shortcut run `Companion.vbs --local`.
+   Don't want phone access? Create the shortcut with `Create Desktop Shortcut.vbs --local`.
 
 5. **Player faces (optional, one-time).** The app shows initials by default. To fetch player
    headshots to your machine:
@@ -43,8 +43,16 @@ once per machine.
 
 ## A desktop shortcut
 
-Right-click `Companion.vbs` → **Send to → Desktop (create shortcut)**, rename it *Companion*.
+Double-click **`Create Desktop Shortcut.vbs`**. It puts *Companion* on your desktop with the app's
+own icon and points it at the right folder. Run it again any time — it replaces the shortcut rather
+than adding a second one. Want phone access off? Run it as `Create Desktop Shortcut.vbs --local`.
+
 From then on it is one double-click: if the server is already running it just opens the page.
+
+> The icon has to live on the **shortcut**, not on `Companion.vbs`. Windows draws every `.vbs` with
+> the Windows Script Host icon and offers no way to change that, which is why this is a script
+> rather than a property on the file. If the desktop still shows the old icon after running it,
+> press <kbd>F5</kbd> on the desktop — Windows caches icons aggressively.
 
 ## Where things live
 
@@ -78,6 +86,7 @@ Everything runs from the app folder.
 | `npm run backfill:fixtures` | Reads club names for the league table out of every archived save. `-- --reset` re-derives from scratch. |
 | `npm run import:faces` | Fetches player headshots once, on your instruction. |
 | `npm run import:names` | Rebuilds the name table. |
+| `npm run make:icon` | Redraws `Companion.ico` and `web/favicon.ico` from the mark in `web/favicon.svg`. Only needed if you change the mark. |
 | `npm test` | The test suite. |
 
 There are two more for decoding work — `experiment:baseline` and `experiment:stats` — documented in
@@ -104,6 +113,9 @@ Delete the folder. Nothing is installed anywhere else — no registry entries, n
 - **Phone can't connect** — same Wi-Fi? Launcher run without `--local`? Check the firewall
   allowed Node on private networks.
 - **Faces are initials** — run `npm run import:faces` once, then refresh.
+- **The desktop icon looks jagged or is the plain script icon** — run
+  `Create Desktop Shortcut.vbs`, then press <kbd>F5</kbd> on the desktop. The icon belongs to the
+  shortcut; a `.vbs` file cannot carry one.
 - **You want Companion to read a different save** — Customise → Save file. It lists what it finds
   and takes a full path for anything else, including a save copied from another machine. Choosing
   one moves the watcher onto its folder.
