@@ -538,6 +538,12 @@ export class HistoryStore {
       .all(careerId, season, leagueId) as Pairing[];
   }
 
+  /** How many saves have been ingested, across every career. */
+  snapshotCount(): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM snapshot').get() as { n: number };
+    return row.n;
+  }
+
   /** Every slot named so far this season. */
   slotNames(careerId: number, season: number): SlotAnchor[] {
     return this.db

@@ -33,6 +33,8 @@ export interface ServerOptions {
    * follows the newest save as it always did.
    */
   saves?: SaveControl | undefined;
+  /** Facts about this run, for the Customise screen. Optional. */
+  session?: (() => unknown) | undefined;
 }
 
 export interface SaveControl {
@@ -50,9 +52,10 @@ const MIME: Record<string, string> = {
 };
 
 export class ViewServer {
-  private readonly options: Omit<Required<ServerOptions>, 'facesRoot' | 'saves'> & {
+  private readonly options: Omit<Required<ServerOptions>, 'facesRoot' | 'saves' | 'session'> & {
     facesRoot?: string | undefined;
     saves?: SaveControl | undefined;
+    session?: (() => unknown) | undefined;
   };
   private readonly clients = new Set<ServerResponse>();
   private server = createServer((req, res) => {
@@ -145,6 +148,15 @@ export class ViewServer {
         'cache-control': 'no-store',
       });
       res.end(JSON.stringify(this.options.saves.list()));
+      return;
+    }
+
+    if (url.pathname === '/api/session' && this.options.session) {
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'no-store',
+      });
+      res.end(JSON.stringify(this.options.session()));
       return;
     }
 

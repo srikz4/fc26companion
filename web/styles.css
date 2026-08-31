@@ -1531,6 +1531,55 @@ td.res.r-l { color: var(--down); }
 .legnote { flex-basis: 100%; font-size: 11px; color: var(--ink-faint); }
 .unnamedchip { font-size: 10.5px; font-style: italic; color: var(--ink-faint); white-space: nowrap; }
 
+/* ============================================================ this session */
+
+.sessionbody { display: grid; gap: 12px; }
+.sessioncols { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 700px) { .sessioncols { grid-template-columns: minmax(0, 1fr); } }
+
+.sessionreach { display: grid; gap: 6px; justify-items: start; max-width: 240px; }
+/*
+ * The code is drawn black on white regardless of theme. A scanner reads
+ * contrast, not taste, and an "on-brand" QR that fails in a dim room is worse
+ * than no QR — hence the white plate rather than letting the panel show through.
+ */
+.qrframe {
+  background: #fff; padding: 8px; border-radius: var(--r-md);
+  line-height: 0; box-shadow: 0 1px 0 rgb(0 0 0 / 0.35);
+}
+.qrframe .qr { width: 168px; height: 168px; display: block; }
+.qraddr {
+  font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--ink); word-break: break-all;
+}
+
+.sessionfacts { display: grid; gap: 2px; align-content: start; }
+.sessionrow {
+  display: grid; grid-template-columns: 8.5rem minmax(0, 1fr); gap: 10px;
+  padding: 4px 0; border-bottom: 1px solid var(--line-soft); align-items: baseline;
+}
+.sessionrow:last-child { border-bottom: 0; }
+.sessionrow i { font-style: normal; font-size: 11.5px; color: var(--ink-faint); }
+.sessionrow b { font-size: 12.5px; font-weight: 650; word-break: break-word; }
+
+/* ============================================================ full screen */
+
+/*
+ * Sits in the header with the sync dot. `relative` so its dwell bar fills the
+ * button rather than escaping to the bar, which is what happens to any control
+ * that forgets to be its own positioning context.
+ */
+.fsbtn {
+  position: relative; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; margin-left: 4px; padding: 0;
+  border: 1px solid var(--line-soft); border-radius: var(--r-sm, 6px);
+  background: transparent; color: var(--ink-faint); cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.fsbtn:hover { color: var(--ink); border-color: var(--line); }
+.fsbtn.on { color: var(--brand); border-color: var(--brand-line, var(--brand)); }
+
 /* ============================================================ save file picker */
 
 .savebody { display: grid; gap: 10px; }

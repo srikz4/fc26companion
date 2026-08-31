@@ -11,6 +11,7 @@
  */
 
 import { icon, HEADING_ICONS, EVENT_ICONS } from './icons.js';
+import { qrSvg } from './qr.js';
 
 const DWELL_MS = 900;
 
@@ -1527,8 +1528,10 @@ function renderPitch(xi, diff, byId, nameOf) {
     }
 
     if (changed && savedId !== null) {
-      pc.appendChild(el('div', 'swap', `for ${nameOf(savedId)}`));
-      node.dataset.tip = `${node.dataset.tip ?? ''} — you picked ${nameOf(savedId)}; ${who} fits this slot better.`;
+      // "for X" read as though X were the one being recommended. This pitch is
+      // OUR eleven, and the tag names who you have there instead.
+      pc.appendChild(el('div', 'swap', `in for ${nameOf(savedId)}`));
+      node.dataset.tip = `${node.dataset.tip ?? ''} — you have ${nameOf(savedId)} here; ${who} fits this slot better.`;
     }
 
     node.appendChild(pc);
@@ -1738,8 +1741,8 @@ function renderMatchday(doc) {
 
     const side = el('div', 'pitch-side');
     const legend = el('div', 'pitch-legend');
-    legend.appendChild(el('span', null, 'Rating in that slot'));
-    legend.appendChild(el('span', 'lg-amber', 'Amber = we would pick someone else'));
+    legend.appendChild(el('span', null, 'This is the XI we would pick — the number is his rating in that slot'));
+    legend.appendChild(el('span', 'lg-amber', 'Amber = a change from the XI you saved; the tag names who you have there'));
     side.appendChild(legend);
 
     // The eleven as a list, for reading rather than scanning. Football order,
@@ -5817,6 +5820,103 @@ function renderSettings() {
   frag.appendChild(intro);
 
   /**
+   * This session: where to reach it, and what it is doing.
+   *
+   * The phone address is the reason the QR is here. Typing an IP into a phone
+   * keyboard is the one genuinely annoying step in setting this up, and the
+   * code is generated on this machine — there is no service involved, because
+   * handing your LAN address to a QR website would undo the point of an app
+   * that never talks to the network.
+   */
+  const sessionPanel = el('div', 'panel');
+  sessionPanel.appendChild(el('h2', null, 'This session'));
+  const sessionBody = el('div', 'sessionbody');
+  sessionBody.appendChild(el('p', 'muted tiny', 'Reading\u2026'));
+  sessionPanel.appendChild(sessionBody);
+  frag.appendChild(sessionPanel);
+
+  const since = (iso) => {
+    if (!iso) return 'never';
+    const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.round(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.round(secs / 3600)}h ago`;
+    return `${Math.round(secs / 86400)}d ago`;
+  };
+  const forDuration = (secs) => {
+    if (secs === null || secs === undefined) return '—';
+    if (secs < 60) return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+    return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  };
+
+  const paintSession = (info) => {
+    sessionBody.replaceChildren();
+    if (!info || info.error) {
+      sessionBody.appendChild(el('p', 'muted tiny', info?.error ?? 'Could not read this session.'));
+      return;
+    }
+
+    const phone = (info.lan ?? [])[0] ?? null;
+    const cols = el('div', 'sessioncols');
+
+    // The phone address, and the code that saves you typing it.
+    const reach = el('div', 'sessionreach');
+    if (phone) {
+      const code = qrSvg(phone);
+      if (code) {
+        const frame = el('div', 'qrframe');
+        frame.appendChild(code);
+        reach.appendChild(frame);
+      }
+      reach.appendChild(el('div', 'qraddr', phone));
+      reach.appendChild(
+        el('p', 'muted tiny', 'Point your phone\u2019s camera at this. Same Wi-Fi, and the page opens in its browser.'),
+      );
+      if ((info.lan ?? []).length > 1) {
+        reach.appendChild(
+          el('p', 'muted tiny', `Other addresses on this machine: ${info.lan.slice(1).join(', ')}. If the code does not work, one of these is the right network.`),
+        );
+      }
+    } else {
+      reach.appendChild(
+        el('p', 'muted tiny', 'Phone access is off for this run. Start Companion without --local and the address and its code appear here.'),
+      );
+    }
+    cols.appendChild(reach);
+
+    // The facts, as a plain list.
+    const facts = el('div', 'sessionfacts');
+    const row = (label, value, tip) => {
+      const line = el('div', 'sessionrow');
+      line.appendChild(el('i', null, label));
+      const v = el('b', null, value ?? '—');
+      if (tip) v.dataset.tip = tip;
+      line.appendChild(v);
+      facts.appendChild(line);
+    };
+    row('On this PC', info.local);
+    row('Phone access', info.lanEnabled ? 'on' : 'off (--local)');
+    row('Running for', forDuration(info.uptimeSeconds), `Started ${new Date(info.startedAt).toLocaleString()}`);
+    row('Reading', info.following ? info.following.split(/[\\/]/).pop() : 'no save yet', info.following ?? undefined);
+    row('Saved in game', since(info.savedAt), info.savedAt ? new Date(info.savedAt).toLocaleString() : undefined);
+    row('Last read', since(info.lastReadAt), info.lastReadMs !== null ? `Took ${info.lastReadMs} ms` : undefined);
+    row('Watching', info.watching);
+    row('Saves stored', `${info.snapshots} across ${info.careers} career${info.careers === 1 ? '' : 's'}`);
+    row('Node', `${info.node} \u00b7 parser ${info.parserVersion}`);
+    cols.appendChild(facts);
+
+    sessionBody.appendChild(cols);
+  };
+
+  const loadSession = () =>
+    fetch('/api/session')
+      .then((r) => r.json())
+      .then(paintSession)
+      .catch(() => paintSession({ error: 'Could not reach Companion to read this session.' }));
+  loadSession();
+
+  /**
    * Which save file Companion reads.
    *
    * Unlike everything else on this screen, this one is NOT a browser setting: it
@@ -6342,6 +6442,36 @@ function paintSync() {
         : 'Companion reads the save file, so it is only ever as current as your last save. Save in game and it updates within a few seconds.';
 }
 
+/**
+ * Full screen, on the same dwell as everything else.
+ *
+ * A second screen is the one place where the browser's own chrome is pure
+ * waste — you are not navigating, you are reading a table across the room. The
+ * label follows the state rather than staying "Full screen", because a button
+ * that does not say what it will do next is a button you press twice.
+ */
+function wireFullscreen() {
+  const btn = document.getElementById('fullscreen');
+  if (!btn) return;
+  const supported = !!document.documentElement.requestFullscreen;
+  if (!supported) {
+    btn.remove();
+    return;
+  }
+  const paint = () => {
+    const on = !!document.fullscreenElement;
+    btn.replaceChildren(icon(on ? 'minimise' : 'expand', 15));
+    btn.dataset.tip = on ? 'Leave full screen (Esc)' : 'Full screen — hide the browser chrome';
+    btn.classList.toggle('on', on);
+  };
+  activatable(btn, () => {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else document.documentElement.requestFullscreen?.().catch(() => {});
+  });
+  document.addEventListener('fullscreenchange', paint);
+  paint();
+}
+
 async function load(flash = false) {
   try {
     const response = await fetch('/api/view', { cache: 'no-store' });
@@ -6422,4 +6552,5 @@ function wire() {
 }
 
 wire();
+wireFullscreen();
 load();

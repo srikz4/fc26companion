@@ -118,6 +118,74 @@ interface Candidate {
   headroom: number | null;
   available: boolean;
   fits: Map<Slot, { value: number; familiar: boolean }>;
+  /** Every position the game lists for him, as its own codes. */
+  positions: number[];
+  /** 1 right, 2 left, as `preferredfoot` records it. */
+  foot: number | null;
+}
+
+/**
+ * Which flank a position belongs to.
+ *
+ * The fit model is deliberately side-blind — a fullback's attributes are a
+ * fullback's attributes, and splitting the slot would halve the sample every
+ * curve is fitted on. But a shape is not side-blind: it has a left-back and a
+ * right-back, and putting the wrong man in each is exactly the kind of mistake
+ * that makes an otherwise good recommendation unusable. So the side is handled
+ * here, where the real position code is known, rather than in the fit.
+ */
+/**
+ * The game gives one role several codes — three for centre-back, three for
+ * centre-mid, three for striker — because a formation needs to place them
+ * apart. They are the same job, so "he plays here" has to compare the role, not
+ * the code, or a centre-back is out of position at two thirds of the centre-back
+ * slots.
+ */
+const ROLE_OF_CODE = [
+  'GK', 'SW', 'RWB', 'RB', 'CB', 'CB', 'CB', 'LB', 'LWB',
+  'CDM', 'CDM', 'CDM', 'RM', 'CM', 'CM', 'CM', 'LM',
+  'CAM', 'CAM', 'CAM', 'RF', 'CF', 'LF', 'RW', 'ST', 'ST', 'ST', 'LW',
+] as const;
+
+const roleOf = (code: number): string | null => ROLE_OF_CODE[code] ?? null;
+
+/** Does he list this role among his own positions? */
+function playsRole(candidate: Candidate, code: number): boolean {
+  const want = roleOf(code);
+  return want !== null && candidate.positions.some((p) => roleOf(p) === want);
+}
+
+function sideOf(code: number): 'left' | 'right' | 'central' {
+  if (code === 7 || code === 8 || code === 16 || code === 22 || code === 27) return 'left';
+  if (code === 2 || code === 3 || code === 12 || code === 20 || code === 23) return 'right';
+  return 'central';
+}
+
+/**
+ * What it costs to play a man on the wrong flank.
+ *
+ * Reading his own positions first, because that is the game's own answer: a
+ * player listed at right-back is a right-back, whatever his attributes say. Foot
+ * is a lighter, secondary signal — a left-footer on the right wing is an
+ * inverted winger and completely normal, whereas a right-footed left-back is a
+ * genuine compromise, so only the defensive case is charged for.
+ */
+function wrongSideCost(candidate: Candidate, code: number): number {
+  const want = sideOf(code);
+  if (want === 'central') return 0;
+  if (candidate.positions.some((p) => sideOf(p) === want)) return 0;
+
+
+  // He plays this line, but on the other flank.
+  const flankSwap = candidate.positions.some((p) => sideOf(p) !== 'central');
+  let cost = flankSwap ? 3 : 1.5;
+
+  const defensive = code === 2 || code === 3 || code === 7 || code === 8;
+  if (defensive && candidate.foot !== null) {
+    const footSide = candidate.foot === 2 ? 'left' : 'right';
+    if (footSide !== want) cost += 1;
+  }
+  return cost;
 }
 
 export function candidateFrom(player: Row, available: boolean): Candidate | null {
@@ -132,12 +200,20 @@ export function candidateFrom(player: Row, available: boolean): Candidate | null
     if (fit) fits.set(slot, { value: fit.value, familiar: fit.familiar });
   }
 
+  const positions: number[] = [];
+  for (const key of ['preferredposition1', 'preferredposition2', 'preferredposition3', 'preferredposition4']) {
+    const code = num(player, key);
+    if (code !== null && code >= 0) positions.push(code);
+  }
+
   return {
     playerId,
     overall,
     headroom: potential === null ? null : potential - overall,
     available,
     fits,
+    positions,
+    foot: num(player, 'preferredfoot'),
   };
 }
 
@@ -171,24 +247,39 @@ export function pickXI(shape: FormationShape, squad: Candidate[]): XI {
 
   for (const { index, slot } of scarcity) {
     if (slot === null) continue;
+    const code = shape.positions[index]!;
+
+    /**
+     * Score for THIS position, not just this slot.
+     *
+     * Two things the raw fit cannot see. A shape has a left-back and a
+     * right-back where the model has only "fullback", so the flank is charged
+     * for here. And when two men score the same, the one who actually plays
+     * the position should start — without that, a 92-rated winger ties a
+     * 90-rated striker at centre-forward and takes the shirt on overall alone,
+     * which is how a natural striker ends up on the bench.
+     */
+    const score = (c: Candidate): number => {
+      const fit = c.fits.get(slot)!;
+      return fit.value - wrongSideCost(c, code) + (playsRole(c, code) ? 0.75 : 0);
+    };
+
     const best = pool
       .filter((c) => !taken.has(c.playerId) && c.fits.has(slot))
-      .sort((a, b) => {
-        const fa = a.fits.get(slot)!.value;
-        const fb = b.fits.get(slot)!.value;
-        return fb - fa || b.overall - a.overall || a.playerId - b.playerId;
-      })[0];
+      .sort((a, b) => score(b) - score(a) || b.overall - a.overall || a.playerId - b.playerId)[0];
 
     if (!best) continue;
     taken.add(best.playerId);
     const fit = best.fits.get(slot)!;
     assignments[index] = {
       index,
-      positionCode: shape.positions[index]!,
+      positionCode: code,
       slot,
       playerId: best.playerId,
       fit: fit.value,
-      familiar: fit.familiar,
+      // "Naturally" has to mean this position, not this family of positions.
+      // Slot-level familiarity called a left-back at right-back natural.
+      familiar: playsRole(best, code),
       headroom: best.headroom,
     };
   }

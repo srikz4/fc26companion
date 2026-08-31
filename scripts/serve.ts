@@ -19,7 +19,7 @@ import { readFixtureLedger, readLatestResults } from '../src/parser/fixtures.ts'
 import { anchorSlots, compForLeague, completeByElimination } from '../src/engine/standings.ts';
 import { cascadeSlots, pairingsFromLineups } from '../src/engine/pairings.ts';
 import type { SlotFixture } from '../src/parser/fixtures.ts';
-import { HistoryStore, readCareerIdentity } from '../src/store/store.ts';
+import { HistoryStore, PARSER_VERSION, readCareerIdentity } from '../src/store/store.ts';
 import { SaveWatcher } from '../src/watcher/watcher.ts';
 import { listManagerCareerSaves, resolveSaveDirectory } from '../src/core/saveLocation.ts';
 import { readSaveChoice, rejectSavePath, writeSaveChoice, type SaveCandidate } from '../src/core/saveChoice.ts';
@@ -47,14 +47,39 @@ const WEB_ROOT = join(root, 'web');
  */
 const wantLan = process.argv.includes('--lan');
 
+/**
+ * Addresses a phone could actually reach, best first.
+ *
+ * A developer machine is full of IPv4 addresses that are useless here — WSL,
+ * Hyper-V, Docker and VPN adapters all hand out private ranges, and this box
+ * offers 172.24.240.1 before its real Wi-Fi. Printing them in whatever order
+ * the OS returns is survivable when a human reads the list and picks; it is not
+ * survivable when the first one becomes a QR code. So they are ranked: real
+ * adapters over virtual ones, and home ranges over the ranges virtualisation
+ * tends to claim.
+ */
 function lanAddresses(): string[] {
-  const out: string[] = [];
-  for (const list of Object.values(networkInterfaces())) {
+  const VIRTUAL = /vethernet|hyper-?v|wsl|docker|virtualbox|vmware|tailscale|zerotier|loopback|tap-|npcap/i;
+  const scored: { address: string; score: number }[] = [];
+
+  for (const [name, list] of Object.entries(networkInterfaces())) {
     for (const nic of list ?? []) {
-      if (nic.family === 'IPv4' && !nic.internal) out.push(nic.address);
+      if (nic.family !== 'IPv4' || nic.internal) continue;
+      let score = 0;
+      if (VIRTUAL.test(name)) score -= 100;
+      if (/wi-?fi|wireless|wlan/i.test(name)) score += 12;
+      else if (/ethernet/i.test(name)) score += 10;
+      // 192.168/16 is what home routers hand out; 172.16/12 is where the
+      // virtual adapters live, so it goes last.
+      if (nic.address.startsWith('192.168.')) score += 6;
+      else if (nic.address.startsWith('10.')) score += 4;
+      else if (/^172\.(1[6-9]|2\d|3[01])\./.test(nic.address)) score -= 6;
+      scored.push({ address: nic.address, score });
     }
   }
-  return out;
+
+  scored.sort((a, b) => b.score - a.score || a.address.localeCompare(b.address));
+  return scored.map((s) => s.address);
 }
 
 /** The matchday a save was written after: its latest played fixture. */
@@ -101,11 +126,15 @@ async function main(): Promise<void> {
   // promotion or a milestone can be seen as a change rather than a state.
   let previousAcademyIds: Set<number> | undefined;
   let previousOverall: Map<number, number> | undefined;
+  const startedAt = Date.now();
+  let lastReadAt: number | null = null;
+  let lastReadMs: number | null = null;
 
   /** Reparse the newest save and rebuild the document the page reads. */
   const rebuild = (): void => {
     if (rebuilding) return;
     rebuilding = true;
+    const began = Date.now();
     try {
       const found = listManagerCareerSaves(saveDirectory);
       /**
@@ -315,6 +344,10 @@ async function main(): Promise<void> {
       );
     } finally {
       rebuilding = false;
+      // So the session panel can say when a save was last read, and how long
+      // reading it took.
+      lastReadAt = Date.now();
+      lastReadMs = lastReadAt - began;
     }
   };
 
@@ -324,6 +357,45 @@ async function main(): Promise<void> {
     webRoot: WEB_ROOT,
     facesRoot: join(root, 'data', 'faces'),
     provider: { get: () => view ?? { error: 'no save parsed yet' } },
+    /**
+     * What this run is: where to reach it, what it is reading, what it has
+     * stored. Gathered on request rather than cached, so the uptime and the
+     * "last read" are true at the moment you look.
+     */
+    session: () => {
+      const choice = readSaveChoice(SAVE_CHOICE_PATH);
+      const port = argPort();
+      const following = choice.path ?? listManagerCareerSaves(saveDirectory)[0]?.path ?? null;
+      let savedAt: string | null = null;
+      let savedBytes: number | null = null;
+      if (following) {
+        try {
+          const st = statSync(following);
+          savedAt = st.mtime.toISOString();
+          savedBytes = st.size;
+        } catch {
+          /* moved while we looked */
+        }
+      }
+      return {
+        local: `http://127.0.0.1:${port}`,
+        lan: wantLan ? lanAddresses().map((ip) => `http://${ip}:${port}`) : [],
+        lanEnabled: wantLan,
+        port,
+        startedAt: new Date(startedAt).toISOString(),
+        uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+        node: process.version,
+        parserVersion: PARSER_VERSION,
+        watching: choice.path ? dirname(choice.path) : saveDirectory,
+        following,
+        savedAt,
+        savedBytes,
+        lastReadAt: lastReadAt === null ? null : new Date(lastReadAt).toISOString(),
+        lastReadMs,
+        snapshots: store.snapshotCount(),
+        careers: store.careers().length,
+      };
+    },
     saves: {
       list: () => {
         const chosen = readSaveChoice(SAVE_CHOICE_PATH);

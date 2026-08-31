@@ -67,6 +67,10 @@ const PATHS = {
   snowflake:
     'm10 20-1.25-2.5L6 18M10 4 8.75 6.5 6 6M14 20l1.25-2.5L18 18M14 4l1.25 2.5L18 6M17 21l-3-6h-4l-3 6M17 3l-3 6h-4L7 3M2 12h20M20 9l-2 3 2 3M4 9l2 3-2 3',
   equal: 'M5 9h14M5 15h14',
+
+  // full screen, both ways
+  expand: 'M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M16 21h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3',
+  minimise: 'M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M16 21v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3',
 };
 
 /** An icon as an inline SVG element, inheriting the current text colour. */
