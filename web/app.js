@@ -38,6 +38,7 @@ const SETTING_DEFS = [
   { key: 'leagueTable', group: 'Central', label: 'League table', note: 'Your division added up from the save\u2019s own results \u2014 the table, your full fixture list, and the latest round elsewhere in Europe.', on: true },
   { key: 'newsFeed', group: 'Central', label: 'Around the world', note: 'The save\u2019s own event feed — transfers and news across this world.', on: true },
   { key: 'scoutReports', group: 'Guidance', label: 'Scout report verdicts', note: 'Reads the prospects a scout has delivered and calls each one sign, watch or pass. Switch it off to judge the reports yourself in game — the tab disappears entirely and nothing about them is shown.', on: true },
+  { key: 'favourYouth', group: 'Guidance', label: 'Favour youth in the XI', note: 'Breaks near-ties toward the younger player when we pick an eleven. Worth a fraction of a rating point, never enough to pick a weak player — a 22-year-old edges a 30-year-old a point better, not five. Off, the XI is simply the strongest side today.', on: false },
   { key: 'developFocus', group: 'Guidance', label: 'Development focus', note: 'On the player card: the attributes where growth buys the most, from the fit weights and this world\u2019s percentiles. Point the game\u2019s development plans at them.', on: true },
   { key: 'absurd', group: 'Guidance', label: 'The absurd bit', note: 'The cheeky lines on the Story card.', on: true },
   { key: 'compact', group: 'Preferences', label: 'Compact density', note: 'Tighter paddings and smaller type everywhere — more career per screen.', on: false },
@@ -1726,23 +1727,40 @@ function renderMatchday(doc) {
     frag.appendChild(panel);
   }
 
+  /**
+   * The eleven actually on screen.
+   *
+   * Declared out here rather than inside the pitch block because the bench is
+   * built further down and has to agree with it — a bench listing someone who
+   * is on the pitch is worse than no bench.
+   */
+  const shown = (settings.favourYouth && m.recommendedYouth) || m.recommended;
+
   if (m.recommended) {
     const meta = el('div', 'subhead');
-    meta.appendChild(el('span', null, `Shape ${m.recommended.shape.name}`));
-    meta.appendChild(el('span', null, `Today ${m.recommended.today ?? '—'}`));
-    meta.appendChild(el('span', null, `Growth ${m.recommended.growth ?? '—'}`));
+    meta.appendChild(el('span', null, `Shape ${shown.shape.name}`));
+    meta.appendChild(el('span', null, `Today ${shown.today ?? '—'}`));
+    meta.appendChild(el('span', null, `Growth ${shown.growth ?? '—'}`));
     if (m.saved?.defensiveDepth !== null && m.saved?.defensiveDepth !== undefined) {
       meta.appendChild(el('span', null, `Depth ${m.saved.defensiveDepth}`));
     }
     top.appendChild(meta);
 
+    // The youth-weighted eleven is computed alongside the plain one, so the
+    // switch is a choice between two ready answers rather than a round trip.
+    const chosenXI = shown;
     const wrap = el('div', 'pitch-wrap');
-    wrap.appendChild(renderPitch(m.recommended, m.diff, byId, nameOf));
+    wrap.appendChild(renderPitch(chosenXI, m.diff, byId, nameOf));
 
     const side = el('div', 'pitch-side');
     const legend = el('div', 'pitch-legend');
     legend.appendChild(el('span', null, 'This is the XI we would pick — the number is his rating in that slot'));
     legend.appendChild(el('span', 'lg-amber', 'Amber = a change from the XI you saved; the tag names who you have there'));
+    if (settings.favourYouth) {
+      legend.appendChild(
+        el('span', 'lg-youth', 'Favouring youth — close calls go to the younger man (Customise › Guidance)'),
+      );
+    }
     side.appendChild(legend);
 
     // The eleven as a list, for reading rather than scanning. Football order,
@@ -1750,7 +1768,7 @@ function renderMatchday(doc) {
     side.appendChild(
       table(
         [{ label: 'Pos', pos: true }, 'Player', { label: 'Fit', num: true }, { label: 'OVR', num: true }, { label: 'Growth', num: true }, 'Form'],
-        [...m.recommended.assignments]
+        [...chosenXI.assignments]
           .sort((a, b) => posRank(codeShort(a.positionCode) ?? '') - posRank(codeShort(b.positionCode) ?? ''))
           .map((a) => {
             const p = byId.get(a.playerId);
@@ -1774,7 +1792,7 @@ function renderMatchday(doc) {
   // Who is left: the bench you would name, then everyone else. The old line
   // said "12 available players not in this eleven" and left you to guess who.
   {
-    const inXI = new Set((m.recommended?.assignments ?? []).map((a) => a.playerId));
+    const inXI = new Set((shown?.assignments ?? []).map((a) => a.playerId));
     const rest = doc.senior
       .filter((p2) => !inXI.has(p2.playerId))
       .sort((a, b) => (b.overall ?? 0) - (a.overall ?? 0));
@@ -6443,31 +6461,68 @@ function paintSync() {
 }
 
 /**
- * Full screen, on the same dwell as everything else.
+ * Full screen, on the same dwell as everything else — with one honest caveat.
  *
  * A second screen is the one place where the browser's own chrome is pure
- * waste — you are not navigating, you are reading a table across the room. The
- * label follows the state rather than staying "Full screen", because a button
- * that does not say what it will do next is a button you press twice.
+ * waste: you are not navigating, you are reading a table across the room.
+ *
+ * Two things had to be got right here, both learned the hard way.
+ *
+ * The icon lives in its own span. `activatable` appends the dwell bar as a
+ * child of the button once, at wire time, so repainting the button with
+ * `replaceChildren` deleted the bar and the dwell became invisible.
+ *
+ * And ENTERING full screen needs a user gesture. A dwell is a hover and a
+ * timer, which carries no activation, so the browser refuses it — which is why
+ * dwelling could leave full screen (no gesture needed) but never enter it, and
+ * silently. That cannot be worked around, so it is said instead: the bar still
+ * fills, and if the browser turns the request down the button says to click.
  */
 function wireFullscreen() {
   const btn = document.getElementById('fullscreen');
   if (!btn) return;
-  const supported = !!document.documentElement.requestFullscreen;
-  if (!supported) {
+  if (!document.documentElement.requestFullscreen) {
     btn.remove();
     return;
   }
+
+  const face = el('span', 'fsface');
+  btn.appendChild(face);
+
+  let refused = false;
   const paint = () => {
     const on = !!document.fullscreenElement;
-    btn.replaceChildren(icon(on ? 'minimise' : 'expand', 15));
-    btn.dataset.tip = on ? 'Leave full screen (Esc)' : 'Full screen — hide the browser chrome';
+    face.replaceChildren(icon(on ? 'minimise' : 'expand', 15));
     btn.classList.toggle('on', on);
+    btn.classList.toggle('needsclick', !on && refused);
+    btn.dataset.tip = on
+      ? 'Leave full screen — dwell here, or press Esc'
+      : refused
+        ? 'Click to go full screen — your browser only allows it from a click, not a dwell'
+        : 'Full screen — hide the browser chrome';
   };
-  activatable(btn, () => {
-    if (document.fullscreenElement) document.exitFullscreen?.();
-    else document.documentElement.requestFullscreen?.().catch(() => {});
-  });
+
+  const toggle = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen?.();
+      return;
+    }
+    const attempt = document.documentElement.requestFullscreen?.();
+    // A dwell has no user gesture behind it, so this rejects. Say so rather
+    // than swallowing it and looking broken.
+    void attempt?.then(
+      () => {
+        refused = false;
+        paint();
+      },
+      () => {
+        refused = true;
+        paint();
+      },
+    );
+  };
+
+  activatable(btn, toggle);
   document.addEventListener('fullscreenchange', paint);
   paint();
 }

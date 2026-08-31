@@ -1539,13 +1539,17 @@ td.res.r-l { color: var(--down); }
 
 .sessionreach { display: grid; gap: 6px; justify-items: start; max-width: 240px; }
 /*
- * The code is drawn black on white regardless of theme. A scanner reads
- * contrast, not taste, and an "on-brand" QR that fails in a dim room is worse
- * than no QR — hence the white plate rather than letting the panel show through.
+ * The code is drawn in the accent on the panel itself — no white plate.
+ *
+ * That inverts the specification, which wants dark modules on light. Phone
+ * cameras handle it, and the contrast between the accent and the panel is high
+ * in both themes, but the quiet zone is doing real work here: it is built into
+ * the SVG rather than painted, so the finder patterns still sit in four modules
+ * of clear space whatever is behind the panel.
  */
 .qrframe {
-  background: #fff; padding: 8px; border-radius: var(--r-md);
-  line-height: 0; box-shadow: 0 1px 0 rgb(0 0 0 / 0.35);
+  padding: 4px; border-radius: var(--r-md); line-height: 0;
+  color: var(--brand);
 }
 .qrframe .qr { width: 168px; height: 168px; display: block; }
 .qraddr {
@@ -1579,6 +1583,12 @@ td.res.r-l { color: var(--down); }
 }
 .fsbtn:hover { color: var(--ink); border-color: var(--line); }
 .fsbtn.on { color: var(--brand); border-color: var(--brand-line, var(--brand)); }
+/* The icon sits in its own layer so repainting it cannot take the dwell bar
+ * with it — the bar is a sibling, appended once when the control was wired. */
+.fsface { display: inline-flex; line-height: 0; }
+/* The browser will only enter full screen from a click. When it has just said
+ * so, the button says so too rather than looking inert. */
+.fsbtn.needsclick { color: var(--watch, #f59e0b); border-color: currentColor; }
 
 /* ============================================================ save file picker */
 

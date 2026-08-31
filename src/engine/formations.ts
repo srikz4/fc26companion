@@ -20,6 +20,7 @@
  */
 import type { Row } from '../parser/dbReader.ts';
 import { fitFor, slotOf, type Slot } from './fit.ts';
+import { ageAt } from '../domain/attributes.ts';
 
 const num = (row: Row | undefined, key: string): number | null =>
   typeof row?.[key] === 'number' ? (row[key] as number) : null;
@@ -122,6 +123,30 @@ interface Candidate {
   positions: number[];
   /** 1 right, 2 left, as `preferredfoot` records it. */
   foot: number | null;
+  age: number | null;
+}
+
+export interface PickOptions {
+  /**
+   * Break near-ties toward the younger player.
+   *
+   * Off, the XI is simply the strongest side today, which is the right default:
+   * a manager picking a team wants the best team. On, a small age term joins the
+   * score — enough to turn over a one-point gap, never enough to pick a weak
+   * player. That distinction matters, because "play the kids" should cost you a
+   * fraction of a rating point, not a match.
+   *
+   * Deliberately about AGE rather than remaining growth. A 22-year-old already
+   * at his ceiling still has a decade in the side ahead of a 30-year-old, and
+   * headroom would score them identically at zero.
+   */
+  favourYouth?: boolean;
+}
+
+/** The age term, capped so it only ever settles a close call. */
+function youthBonus(age: number | null): number {
+  if (age === null) return 0;
+  return Math.max(-1.5, Math.min(1.5, (28 - age) * 0.15));
 }
 
 /**
@@ -188,7 +213,7 @@ function wrongSideCost(candidate: Candidate, code: number): number {
   return cost;
 }
 
-export function candidateFrom(player: Row, available: boolean): Candidate | null {
+export function candidateFrom(player: Row, available: boolean, gameDate: number | null = null): Candidate | null {
   const playerId = num(player, 'playerid');
   const overall = num(player, 'overallrating');
   if (playerId === null || overall === null) return null;
@@ -214,6 +239,7 @@ export function candidateFrom(player: Row, available: boolean): Candidate | null
     fits,
     positions,
     foot: num(player, 'preferredfoot'),
+    age: ageAt(num(player, 'birthdate'), gameDate),
   };
 }
 
@@ -224,7 +250,7 @@ export function candidateFrom(player: Row, available: boolean): Candidate | null
  * the specialists are settled before the crowded middle. Ties break on fit, then
  * overall, then id — the same input always gives the same eleven.
  */
-export function pickXI(shape: FormationShape, squad: Candidate[]): XI {
+export function pickXI(shape: FormationShape, squad: Candidate[], opts: PickOptions = {}): XI {
   const pool = squad.filter((c) => c.available);
   const taken = new Set<number>();
 
@@ -261,7 +287,12 @@ export function pickXI(shape: FormationShape, squad: Candidate[]): XI {
      */
     const score = (c: Candidate): number => {
       const fit = c.fits.get(slot)!;
-      return fit.value - wrongSideCost(c, code) + (playsRole(c, code) ? 0.75 : 0);
+      return (
+        fit.value -
+        wrongSideCost(c, code) +
+        (playsRole(c, code) ? 0.75 : 0) +
+        (opts.favourYouth ? youthBonus(c.age) : 0)
+      );
     };
 
     const best = pool

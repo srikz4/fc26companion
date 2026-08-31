@@ -168,6 +168,11 @@ game or by anything else — still lands on screen by itself. The choice is reme
 restarts, and a file that later moves or is deleted is quietly forgotten rather than breaking
 startup.
 
+**Favour youth in the XI** (under Guidance) breaks near-ties toward the younger player when
+Companion picks an eleven. It is worth a fraction of a rating point and never enough to pick a weak
+player: on a live squad it swapped a 30-year-old 85 for a 22-year-old 84 and cost the side a tenth
+of a point. Off — the default — the XI is simply the strongest side today.
+
 **RPG mode** turns the career into a campaign: pick one of nine — or blend several under Custom,
 where their ladders interleave so the arc advances on every front at once. Missions appear in the
 campaign's violet at the top of whichever view the work belongs to — title pace on Team Management,

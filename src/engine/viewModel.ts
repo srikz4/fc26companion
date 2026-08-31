@@ -536,6 +536,8 @@ export interface ViewDocument {
 export interface MatchdayView {
   saved: SavedXI | null;
   recommended: XI | null;
+  /** The same eleven with near-ties broken toward the younger man. */
+  recommendedYouth: XI | null;
   diff: SelectionDiff[];
   shapes: ShapeComparison[];
   /** Every saved team sheet, scored: mean anchored fit of its XI in its own positions. */
@@ -858,7 +860,7 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     else if ((num(link, 'reds') ?? 0) > 0) availability.set(id, 'suspended');
   }
   const candidates = seniorRows
-    .map((row) => candidateFrom(row, !availability.has(num(row, 'playerid')!)))
+    .map((row) => candidateFrom(row, !availability.has(num(row, 'playerid')!), gameDate.date))
     .filter((c): c is NonNullable<typeof c> => c !== null);
 
   const savedXI = readSavedXI(rowsOf(tables, 'cm_mentalities'), rowsOf(tables, 'cm_teamsheets'));
@@ -868,6 +870,15 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
     shapes.find((sh) => sh.name === '4-2-3-1') ??
     shapes[0];
   const recommendedXI = savedShape ? pickXI(savedShape, candidates) : null;
+  /**
+   * The same shape, picked with a thumb on the scale for youth.
+   *
+   * Both are computed here rather than the client asking for one, because the
+   * choice is a preference and preferences live in the browser — sending it to
+   * the server would make a local setting a round trip, and make the document
+   * depend on who is looking at it.
+   */
+  const youthXI = savedShape ? pickXI(savedShape, candidates, { favourYouth: true }) : null;
   const selectionDiff =
     savedXI && recommendedXI ? diffSelection(savedXI, recommendedXI, candidates) : [];
 
@@ -1301,6 +1312,8 @@ export function buildViewDocument(input: BuildInput): ViewDocument {
   const matchday: MatchdayView = {
     saved: savedXI,
     recommended: recommendedXI,
+    /** The same eleven with near-ties broken toward the younger man. */
+    recommendedYouth: youthXI,
     diff: selectionDiff,
     shapes: shapeTable,
     // Sheet role codes are packed roleId*64+focus (derived from the save:

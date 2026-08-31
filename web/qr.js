@@ -308,8 +308,23 @@ export function qrMatrix(text) {
   return best.m;
 }
 
-/** The matrix as an SVG element, sized to fit its container. */
-export function qrSvg(text, { quiet = 3, className = 'qr' } = {}) {
+/**
+ * The matrix as an SVG, in the app's own colour on nothing at all.
+ *
+ * The specification wants dark modules on a light field, and this is the
+ * reverse: the accent on whatever the panel behind it happens to be. That is a
+ * deliberate choice and worth knowing about — a scanner works on contrast, and
+ * an inverted code is a step further than the standard asks. Every phone camera
+ * worth having reads them (iOS and Android both invert automatically), but a
+ * cheap barcode app might not.
+ *
+ * Two things keep it readable. The modules take `currentColor`, so the contrast
+ * is whatever the theme's accent has against the theme's panel, which is high in
+ * both. And the quiet zone stays: it is empty rather than white, but it is still
+ * four modules of nothing, which is what a scanner is actually looking for when
+ * it hunts the finder patterns.
+ */
+export function qrSvg(text, { quiet = 4, className = 'qr' } = {}) {
   const m = qrMatrix(text);
   if (!m) return null;
   const size = m.length;
@@ -322,12 +337,6 @@ export function qrSvg(text, { quiet = 3, className = 'qr' } = {}) {
   svg.setAttribute('aria-label', `QR code for ${text}`);
   svg.classList.add(className);
 
-  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  bg.setAttribute('width', String(total));
-  bg.setAttribute('height', String(total));
-  bg.setAttribute('fill', '#ffffff');
-  svg.appendChild(bg);
-
   // One path for every dark module keeps the DOM small and the render crisp.
   let d = '';
   for (let r = 0; r < size; r++) {
@@ -337,7 +346,7 @@ export function qrSvg(text, { quiet = 3, className = 'qr' } = {}) {
   }
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   path.setAttribute('d', d);
-  path.setAttribute('fill', '#000000');
+  path.setAttribute('fill', 'currentColor');
   svg.appendChild(path);
   return svg;
 }
